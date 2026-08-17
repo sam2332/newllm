@@ -12,6 +12,7 @@ from training.dataset import StoryDataset
 from training.big_dataset import generate_dataset
 from training.trainer import Trainer
 from training.device_utils import get_best_device
+from results_logger import save_result
 
 
 def make_typed_dataset(num_stories=4096, max_len=512):
@@ -33,7 +34,7 @@ def make_typed_dataset(num_stories=4096, max_len=512):
     return typed
 
 
-def train_sequence_moe(num_experts=4, iters=2000):
+def train_sequence_moe(num_experts=4, iters=3000):
     device = get_best_device()
     print(f"\n=== Sequence MoE on {device} ===")
     typed = make_typed_dataset(4096, 512)
@@ -63,7 +64,8 @@ def train_sequence_moe(num_experts=4, iters=2000):
     history = trainer.train()
     elapsed = time.time() - start
 
-    print(f"final_loss={history[-1]:.4f} time={elapsed:.1f}s")
+    final_loss = history[-1]
+    print(f"final_loss={final_loss:.4f} time={elapsed:.1f}s")
 
     # check clustering
     prompts = {
@@ -75,12 +77,32 @@ def train_sequence_moe(num_experts=4, iters=2000):
     from sampling import Sampler
     sampler = Sampler(temperature=0.8, top_k=20, top_p=0.9,
                       repetition_penalty=1.2)
+    generations = {}
+    cluster_assignments = {}
     for topic, text in prompts.items():
         tokens = torch.tensor([[min(ord(c), 255) for c in text]],
                               dtype=torch.long, device=device)
         cluster = model.cluster_assignments(tokens).item()
         generated = trainer.generate(text, max_new=80, sampler=sampler)
+        generations[topic] = generated
+        cluster_assignments[topic] = cluster
         print(f"[{topic}]> expert={cluster} gen='{generated}'")
+
+    result = {
+        "num_experts": num_experts,
+        "iters": iters,
+        "final_loss": final_loss,
+        "best_loss": min(history),
+        "avg_last_50": sum(history[-50:]) / max(1, len(history[-50:])),
+        "elapsed_seconds": elapsed,
+        "topic_counts": {k: len(v) for k, v in typed.items()},
+        "cluster_assignments": cluster_assignments,
+        "generations": generations,
+        "history": history,
+    }
+    path = save_result("sequence_moe", result)
+    print(f"results saved to {path}")
+    return result
 
 
 if __name__ == "__main__":

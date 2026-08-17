@@ -23,6 +23,10 @@
 
 ## In progress
 
+- [x] Persist all sequence MoE experiment results to `results/`
+- [x] Build a tiny ReAct agent with tools (`calc`, `now`, `search_memory`)
+- [x] Add explicit `BEGIN_THINK`/`END_THINK` internal reasoning to agent traces
+- [ ] Train agentic transformer to basic tool-usage competence (accuracy > 70%)
 - [ ] Make sequence MoE generate coherent continuations per topic
 - [ ] Train 8K big model to convergence
 - [ ] Add checkpoint saving/loading

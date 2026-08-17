@@ -19,6 +19,26 @@ Long-context benchmark:
 python training_8k_big.py
 ```
 
+Result logging:
+
+```powershell
+python train_sequence_moe.py
+python -m agent.train_agent
+```
+
+Every run writes a timestamped JSON file to `results/`. Keep these files — they are the permanent record of experiments.
+
+Agentic tool-use experiments:
+
+```powershell
+python -m agent.train_agent
+```
+
+- Defines `calc`, `now`, `search_memory`, `finish` tools in `agent/tools.py`.
+- Synthetic ReAct training data lives in `agent/agent_dataset.py`.
+- Inference loop with tool execution lives in `agent/agent_loop.py`.
+- Trained model learns to emit `BEGIN_THINK` ... `END_THINK` internal reasoning plus tool calls.
+
 ## Project layout
 
 - `model/` — modular transformer components.

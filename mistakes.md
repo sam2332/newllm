@@ -47,3 +47,15 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 **Status:** Ongoing. Routing is balanced but generated text still degrades into repetition.
 **Hypothesis:** Each mini-mind expert is only trained on ~25% of data; 3K steps is too few. Need longer training or shared expert layers.
+
+## Agent loop context length
+
+**Mistake:** `RuntimeError: tensor a (306) must match tensor b (256)` when running the tiny agent.
+**Why:** ReAct loop appends observations, so context can exceed `max_len`. RoPE buffers are sized for `max_len`.
+**Fix:** Truncate `input_ids` to the model's `max_len` before every forward pass in `agent/agent_loop.py`.
+
+## Agent trace formatting
+
+**Mistake:** Trained agent produced 14.29% accuracy and regurgitated the prompt (`Question: ... BEGIN_THINK`) instead of generating a proper ReAct chain.
+**Why:** Training traces were joined with single spaces in `agent/agent_dataset.py`, so `BEGIN_THINK`/`END_THINK`/actions/observations ran together without line delimiters. The model could not learn structure. Inference also seeded with no newline separators and used `TOOL_RE.search(text)` (first action) instead of the last generated action.
+**Fix:** Changed `_format_trace` to use newline-delimited lines. Updated `agent_loop.py` to seed with `Question: ...\nBEGIN_THINK\n`, append `\nObservation: ...\n` after each tool result, and parse the *last* `Action:` inside the think block. Also expanded `Toolbox.memory` to match evaluation keys and fixed answer extraction to stop at newlines.

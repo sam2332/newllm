@@ -13,8 +13,24 @@
 - Added sampler with temperature, top-k, top-p, min-p, repetition penalty.
 - Created agent docs: `AGENTS.md`, `goals.md`, `progress.md`, `mistakes.md`.
 
+## Result logging
+
+- Added `results/` directory and `results_logger.py`.
+- `train_sequence_moe.py` now writes timestamped JSON with loss curves, topic routing, and sample generations.
+- First logged run: `results/sequence_moe_20260817_204127.json` — final_loss=0.9178, time=139.8s, generations still degenerate.
+
+## Agentic tool-use experiments
+
+- Added `agent/` package: `tools.py`, `agent_dataset.py`, `agent_loop.py`, `train_agent.py`.
+- Defined tools: `calc`, `now`, `search_memory`, `finish`.
+- Training traces use ReAct format with explicit `BEGIN_THINK`/`END_THINK` internal reasoning block.
+- Scaled to 100k traces and a 12.8M-parameter transformer (d_model=512, 6 layers, 8 heads).
+- In-progress run: `results/agent_*.json` — first large-scale run currently training.
+
 ## Next expected steps
 
-- Stabilize sequence MoE generation.
+- Finish current agent training run and check tool-use accuracy.
+- Iterate data/model until agent achieves >70% accuracy on held-out questions.
+- Fix sequence MoE generation collapse.
 - Add checkpointing.
 - Run full 8K big training to convergence.
