@@ -1,0 +1,26 @@
+# requirements for NVIDIA RTX 5060 Ti with CUDA 13.3
+# Install with:
+#   pip install -r requirements.txt
+
+# Use NVIDIA index for CUDA-enabled PyTorch
+torch>=2.6.0
+torchvision>=0.21.0
+torchaudio>=2.6.0
+
+# Training / ML utils
+tqdm
+numpy
+matplotlib
+seaborn
+
+# Optional speed/memory helpers for LLM training
+# bitsandbytes  # 4-bit/8-bit quantization (Windows support limited)
+# transformers  # if loading pretrained tokenizers/models later
+# datasets      # huggingface datasets
+
+# For Windows DirectML fallback if CUDA still broken
+# torch-directml
+
+# Development
+pytest
+black
