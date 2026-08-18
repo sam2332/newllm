@@ -9,7 +9,6 @@ observations, and continues until the model emits a response or a stop token.
 """
 
 import json
-import re
 import torch
 
 from agent.tools import Toolbox
@@ -17,20 +16,6 @@ from sampling import Sampler
 
 
 EOT = "\x03"
-SYSTEM_PROMPT = (
-    "You are a helpful reasoning agent. Available tools: calc(expr), "
-    "search_memory(key), web_search(query), now(). "
-    "Every response must be valid JSON with a 'thought' string and exactly "
-    "one of 'tool_call' or 'response'. "
-    "Use tool_call to call a tool: {\"thought\": \"...\", \"tool_call\": "
-    "{\"name\": \"calc\", \"arguments\": {\"expr\": \"12 + 8\"}}}. "
-    "Use response to give the final answer: {\"thought\": \"...\", "
-    "\"response\": \"20\"}."
-)
-
-
-_ROLE_TAGS = re.compile(r"<(system|user|assistant|tool)(?:\s+name=([^>]+))?>"
-                        r"(.*?)</\1>", re.DOTALL)
 
 
 def _tokenize(text: str, max_vocab: int = 256) -> list:
@@ -38,9 +23,8 @@ def _tokenize(text: str, max_vocab: int = 256) -> list:
 
 
 def _build_context(question: str, history: list) -> str:
-    """Build the text the model sees from the system prompt, question, and
-    any prior assistant/tool turns."""
-    parts = [f"<system>{SYSTEM_PROMPT}</system>", f"<user>{question}</user>"]
+    """Build the exact tagged message form used in the training dataset."""
+    parts = [f"<user>{question}</user>"]
     parts.extend(history)
     return "\n".join(parts)
 
@@ -56,17 +40,41 @@ def _extract_assistant_json(text: str, after_pos: int = 0) -> tuple:
         return None, None, None
     raw = text[content_start:tag_end].strip()
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
+        parsed = _validate_assistant_message(json.loads(raw))
+    except (json.JSONDecodeError, ValueError):
         # Try to salvage a leading valid JSON object if extra tokens follow.
         for end in range(len(raw), 0, -1):
             try:
-                parsed = json.loads(raw[:end])
+                parsed = _validate_assistant_message(json.loads(raw[:end]))
                 return tag_start, tag_end + len("</assistant>"), parsed
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError):
                 continue
         return None, None, None
     return tag_start, tag_end + len("</assistant>"), parsed
+
+
+def _validate_assistant_message(parsed: object) -> dict:
+    """Validate the JSON contract before treating a model output as a turn."""
+    if not isinstance(parsed, dict):
+        raise ValueError("assistant message must be a JSON object")
+    if not isinstance(parsed.get("thought"), str):
+        raise ValueError("assistant message requires a string thought")
+    has_tool_call = "tool_call" in parsed
+    has_response = "response" in parsed
+    if has_tool_call == has_response:
+        raise ValueError("assistant message requires exactly one action field")
+    if has_response:
+        if not isinstance(parsed["response"], str):
+            raise ValueError("assistant response must be a string")
+    else:
+        tool_call = parsed["tool_call"]
+        if not isinstance(tool_call, dict):
+            raise ValueError("tool_call must be an object")
+        if not isinstance(tool_call.get("name"), str):
+            raise ValueError("tool_call requires a string name")
+        if not isinstance(tool_call.get("arguments"), dict):
+            raise ValueError("tool_call requires object arguments")
+    return parsed
 
 
 def _find_unexecuted_action(text: str, executed_ends: set) -> tuple:
@@ -117,7 +125,7 @@ def run_agent(model, question: str, toolbox: Toolbox,
 
     max_len = getattr(model, "max_len", 512)
     history = []
-    trace_parts = [f"<system>{SYSTEM_PROMPT}</system>", f"<user>{question}</user>"]
+    trace_parts = [f"<user>{question}</user>"]
     steps = []
     executed_ends = set()
 

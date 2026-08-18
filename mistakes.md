@@ -146,3 +146,23 @@ Result: the S-size curriculum model now correctly answers single-step and multi-
 - Restart the L run with a smaller effective batch (e.g. batch 8 × accum 8) or gradient checkpointing.
 - Monitor `nvidia-smi` memory and clock throttling if it stalls again.
 - Save checkpoints more frequently and resume rather than running uninterrupted.
+
+## JSON-message protocol migration is a checkpoint-breaking change
+
+**Mistake:** The legacy ReAct agent checkpoint was evaluated through the new JSON-message loop after replacing `BEGIN_THINK`/`END_THINK` and `Action:` traces.
+**Why:** The old checkpoint was trained to emit the legacy flat trace grammar, while the new loop expects tagged message blocks containing JSON assistant objects. Neither prompt nor parser is backward compatible.
+**Impact:** The legacy checkpoint returns empty answers through the JSON loop. A short JSON diagnostic run then overwrote `checkpoints/agent_best.pt`; it has low loss but 0% task accuracy and is not promotable.
+**Rule:** Treat a serialization/protocol migration as a new model family. Train a fresh checkpoint in a separate directory, preserve the existing promoted checkpoint, and only update the default `agent_best.pt` after the new family passes its own regression gate.
+
+## Low loss does not validate JSON tool-use behavior
+
+**Mistake:** A 1,000-iteration S-size JSON math-only run was treated as a meaningful quality signal because training loss reached approximately 0.11.
+**Why:** Character-level next-token loss is dominated by repeated tags, punctuation, JSON keys, and fixed reasoning phrasing. It does not prove that the model emits a complete assistant message, grounds numbers from the question, or produces a valid final response.
+**Evidence:** The diagnostic run produced no parsed final answers on the full evaluation battery despite low loss.
+**Rule:** For each new agent format, run parser unit tests plus behavior-level evaluation before saving or promoting any checkpoint. Keep diagnostic checkpoints outside `checkpoints/agent_best.pt`.
+
+## JSON multi-hop traces exceeded the original context budget
+
+**Mistake:** The JSON agent kept the legacy 512-byte context limit after adding tagged roles, JSON fields, thoughts, and tool observations.
+**Why:** Full multi-hop traces are up to 702 bytes. The truncation fallback retains the final answer but can discard the question and prior tool turns, making the remaining training target ungrounded.
+**Fix:** The new JSON agent defaults to `max_len=768`; it is configurable through `agent.train_agent --max-len`. A unit test now samples the full dataset and verifies traces fit this budget.

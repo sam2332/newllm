@@ -6,7 +6,13 @@ loop.
 """
 
 import pytest
-from agent.agent_loop import _extract_assistant_json, _find_unexecuted_action, _find_final_response
+from agent.agent_dataset import generate_agent_dataset
+from agent.agent_loop import (
+    _build_context,
+    _extract_assistant_json,
+    _find_unexecuted_action,
+    _find_final_response,
+)
 from agent.tools import Toolbox
 
 
@@ -21,6 +27,34 @@ def test_extract_assistant_json_response():
     text = '<assistant>{"thought":"done","response":"20"}</assistant>'
     start, end, parsed = _extract_assistant_json(text)
     assert parsed["response"] == "20"
+
+
+@pytest.mark.parametrize("content", [
+    '{"response":"20"}',
+    '{"thought":"done","response":20}',
+    '{"thought":"done","tool_call":{"name":"calc","arguments":{}},"response":"20"}',
+    '{"thought":"call","tool_call":{"name":"calc","arguments":"12 + 8"}}',
+])
+def test_extract_assistant_json_rejects_invalid_contract(content):
+    text = f"<assistant>{content}</assistant>"
+    assert _extract_assistant_json(text) == (None, None, None)
+
+
+def test_inference_context_matches_training_message_format():
+    assert _build_context("What is 12 + 8?", []) == "<user>What is 12 + 8?</user>"
+    assert _build_context("What is 12 + 8?", [
+        '<assistant>{"thought":"calculate","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>',
+        "<tool name=calc>20</tool>",
+    ]) == (
+        "<user>What is 12 + 8?</user>\n"
+        '<assistant>{"thought":"calculate","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>\n'
+        "<tool name=calc>20</tool>"
+    )
+
+
+def test_full_dataset_traces_fit_json_context_budget():
+    traces = generate_agent_dataset(num_samples=1000, max_len=768)
+    assert max(map(len, traces)) <= 768
 
 
 def test_find_unexecuted_action_skips_executed():

@@ -80,10 +80,43 @@ python -m pytest agent/test_agent_regression.py -v --web
 python -m pytest agent/test_agent_loop.py -v
 ```
 
+## JSON Agent Protocol (Current)
+
+The agent is being migrated from legacy ReAct text to tagged JSON messages.
+This is a new model family; legacy checkpoints do not work with the new loop.
+
+```text
+<user>What is 12 + 8?</user>
+<assistant>{"thought":"I need the calculator.","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>
+<tool name=calc>20</tool>
+<assistant>{"thought":"The calculation is complete.","response":"20"}</assistant>
+```
+
+- Every assistant turn must be valid JSON.
+- Every assistant object has a required `thought` string.
+- It has exactly one of `tool_call` or `response`.
+- `tool_call` uses `{ "name": string, "arguments": object }`.
+- `agent/ollama_cot.py` can collect short reasoning examples through Ollama at `http://localhost:11434/api/chat`; default model name is `kimi2.7-cloud`.
+
+Current JSON migration validation:
+
+```powershell
+python smoke_test.py
+python -m pytest agent/test_agent_loop.py -v
+```
+
+Do not run JSON diagnostic training into `checkpoints/agent_best.pt`. Use a dedicated directory, for example:
+
+```powershell
+python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --math-only --no-resume --checkpoint-dir checkpoints_json --max-len 768
+```
+
+Read [HANDOFF.md](HANDOFF.md) before continuing the migration.
+
 - Defines `calc`, `now`, `search_memory`, `web_search`, `finish` tools in `agent/tools.py`.
-- Synthetic ReAct training data lives in `agent/agent_dataset.py`.
+- Synthetic JSON-message training data lives in `agent/agent_dataset.py`.
 - Inference loop with tool execution lives in `agent/agent_loop.py`.
-- Trained model learns to emit `BEGIN_THINK` ... `END_THINK` internal reasoning plus JSON tool calls.
+- Trained model is now expected to emit JSON `thought` + `tool_call`/`response` objects.
 - Best checkpoints are promoted to `checkpoints/agent_best.pt`; old artifacts live in `archive/`.
 - `agent/promote.py` runs a regression gate before promotion. A candidate must pass absolute thresholds AND win at least 3 out of 5 metric comparisons against the current best (`checkpoints/agent_best.pt`). The old best is kept as `*_prev.pt`.
 - `agent/test_agent_regression.py` is the matching PyTest suite.

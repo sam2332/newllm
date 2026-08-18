@@ -108,3 +108,23 @@
 - Fix sequence MoE generation collapse.
 - Add KV-cache, real corpus loading, and validation metrics.
 - Run full 8K big training to convergence.
+
+## JSON message-agent rewrite and handoff status
+
+- The legacy `BEGIN_THINK`/`END_THINK` ReAct protocol was replaced in the working tree with a JSON-message protocol.
+- The intended contract is:
+  - User message: `<user>question</user>`.
+  - Assistant tool turn: `<assistant>{"thought":"...","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>`.
+  - Tool result: `<tool name=calc>20</tool>`.
+  - Assistant final turn: `<assistant>{"thought":"...","response":"20"}</assistant>`.
+- `thought` is required on every assistant turn. Each assistant object must contain exactly one of `tool_call` or `response`.
+- Updated implementation files: `agent/agent_dataset.py`, `agent/agent_loop.py`, `agent/train_agent.py`, `agent/chat.py`, `agent/test_agent_loop.py`, and new `agent/ollama_cot.py`.
+- `python smoke_test.py` passed after the rewrite.
+- `python -m pytest agent/test_agent_loop.py -v` passed: 15 tests.
+- Fixed an inference/training prompt mismatch: training traces begin directly with `<user>`, so the JSON loop now uses the same context rather than adding an unseen system prompt.
+- Tightened parsing so an assistant object is rejected unless `thought` is a string and exactly one valid `tool_call` or string `response` is present.
+- Full JSON multi-hop traces can reach 702 bytes. The JSON-agent trainer and model now default to `--max-len 768`; a unit test verifies sampled full traces fit that budget.
+- A fast diagnostic run (`5000` samples, `1000` iterations, S-size, math-only, single-digit) reached low training loss (~0.11) but returned no answers in evaluation. This is not a model-quality result and must not be promoted.
+- `checkpoints/agent_best.pt` was overwritten by that diagnostic run. It is an incompatible JSON-protocol checkpoint with 0% evaluation accuracy and is not a usable best model. Recover the previous promoted legacy checkpoint from `checkpoints/agent_best_prev.pt` or archive before running any legacy tests, but do not use it with the JSON loop.
+- The legacy regression suite currently fails against the diagnostic checkpoint by design; it cannot be used as a JSON-protocol quality gate until a new checkpoint is trained.
+- Handoff priority: make training and inference context serialization identical, retrain a JSON checkpoint, then re-baseline the regression/promotion gate. See `HANDOFF.md`.

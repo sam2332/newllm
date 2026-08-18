@@ -1,8 +1,4 @@
-"""Train a tiny agentic transformer on synthetic ReAct traces.
-
-The model learns to map questions to chains of Thought/Action/Observation/Answer
-with an explicit BEGIN_THINK/END_THINK internal reasoning block.
-"""
+"""Train a tiny transformer on tagged JSON agent-message conversations."""
 
 import os
 import torch
@@ -21,7 +17,7 @@ from results_logger import save_result
 from sampling import Sampler
 
 
-def make_agent_dataset(num_samples=100000, max_len=512, val_frac=0.05,
+def make_agent_dataset(num_samples=100000, max_len=768, val_frac=0.05,
                        simple=True, seed=42, math_only=False,
                        single_digit_math=False):
     if math_only:
@@ -45,7 +41,7 @@ def make_agent_dataset(num_samples=100000, max_len=512, val_frac=0.05,
     return train_set, val_set
 
 
-def make_model(max_len=512, size="L", attention_type="standard", use_moe=False,
+def make_model(max_len=768, size="L", attention_type="standard", use_moe=False,
                num_experts=4, top_k=2):
     """
     Create the agentic transformer.
@@ -122,10 +118,9 @@ def train_agent(num_samples=100000, iters=10000, size="L",
                 attention_type="standard", use_moe=False,
                 checkpoint_dir="checkpoints", resume=True,
                 curriculum=False, save_every=1000, lr=3e-4,
-                math_only=False, single_digit_math=False):
+                math_only=False, single_digit_math=False, max_len=768):
     device = get_best_device()
     print(f"\n=== Agent training on {device} ===")
-    max_len = 512
 
     # Real two-stage curriculum:
     #   stage 1 (simple=True)  -> single-step math/memory/date/web traces
@@ -278,6 +273,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--lr", type=float, default=3e-4,
                         help="peak learning rate (default 3e-4)")
+    parser.add_argument("--max-len", type=int, default=768,
+                        help="JSON message context length in bytes (default 768)")
     parser.add_argument("--math-only", action="store_true",
                         help="diagnostic: train only on single-step math traces")
     parser.add_argument("--single-digit-math", action="store_true",
@@ -298,4 +295,5 @@ if __name__ == "__main__":
         lr=args.lr,
         math_only=args.math_only,
         single_digit_math=args.single_digit_math,
+        max_len=args.max_len,
     )
