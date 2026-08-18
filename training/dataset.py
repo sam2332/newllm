@@ -24,16 +24,23 @@ def char_tokenizer(text: str, max_vocab: int = 256):
 
 
 def collate_pad(batch):
-    """Pad batch to same length."""
-    max_len = max(len(x) for x, _ in batch)
+    """Pad batch to same length.
+
+    Accepts either (x, y) or (x, y, mask) samples.  If a per-sample mask is
+    provided it is padded; otherwise a ones mask is used.
+    """
+    has_mask = len(batch[0]) == 3
+    max_len = max(len(x) for x, *_ in batch)
     xs = []
     ys = []
     masks = []
-    for x, y in batch:
+    for item in batch:
+        x, y = item[0], item[1]
+        mask = item[2] if has_mask else torch.ones(len(x))
         pad = max_len - len(x)
         xs.append(torch.nn.functional.pad(x, (0, pad)))
         ys.append(torch.nn.functional.pad(y, (0, pad), value=-100))
-        masks.append(torch.nn.functional.pad(torch.ones(len(x)), (0, pad)))
+        masks.append(torch.nn.functional.pad(mask, (0, pad)))
     return torch.stack(xs), torch.stack(ys), torch.stack(masks)
 
 

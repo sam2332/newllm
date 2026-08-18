@@ -19,4 +19,6 @@ class TextDecoder(nn.Module):
         Returns:
             (batch, seq_len, vocab_size)
         """
-        return self.dropout(self.hidden_to_logits(x))
+        if self.training:
+            x = self.dropout(x)
+        return self.hidden_to_logits(x)

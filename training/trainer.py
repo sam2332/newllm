@@ -32,9 +32,10 @@ class Trainer:
         self.grad_accum_steps = max(1, grad_accum_steps)
         self.warmup_steps = max(1, warmup_steps)
         self.use_amp = use_amp and torch.cuda.is_available()
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
         self.optimizer = torch.optim.AdamW(model.parameters(), lr=lr, fused=True)
+        self.optimizer.zero_grad()
         if hasattr(dataset, "collate_pad"):
             collator = dataset.collate_pad
         elif hasattr(dataset, "dataset"):
@@ -90,7 +91,7 @@ class Trainer:
         x, y, mask = x.to(self.device), y.to(self.device), mask.to(self.device)
         self.model.train()
 
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
+        with torch.amp.autocast("cuda", enabled=self.use_amp, dtype=torch.float16):
             out = self.model(x)
             loss = self._compute_loss(out, y, mask)
             loss = loss / self.grad_accum_steps
@@ -115,7 +116,7 @@ class Trainer:
         count = 0
         for x, y, mask in self.val_loader:
             x, y, mask = x.to(self.device), y.to(self.device), mask.to(self.device)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
+            with torch.amp.autocast("cuda", enabled=self.use_amp, dtype=torch.float16):
                 out = self.model(x)
                 loss = self._compute_loss(out, y, mask)
             total += loss.item() * x.size(0)

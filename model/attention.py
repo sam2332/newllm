@@ -38,7 +38,7 @@ class MultiHeadAttention(nn.Module):
         # Scaled dot-product attention
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill(mask == 0, -1e4)
         attention = F.softmax(scores, dim=-1)
         attention = self.dropout(attention)
         out = torch.matmul(attention, v).transpose(1, 2).contiguous()

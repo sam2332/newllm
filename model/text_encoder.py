@@ -19,7 +19,7 @@ class TextEncoder(nn.Module):
         else:
             self.pos_encoder = nn.Parameter(torch.randn(max_len, d_model))
         self.dropout = nn.Dropout(dropout)
-        self.scale = nn.Parameter(torch.tensor(1.0))
+        self.scale = nn.Parameter(torch.tensor(float(d_model) ** 0.5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

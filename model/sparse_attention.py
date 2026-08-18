@@ -39,9 +39,9 @@ class SlidingWindowAttention(nn.Module):
         window_mask = (window_mask <= self.window_size).unsqueeze(0).unsqueeze(0)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
-        scores = scores.masked_fill(window_mask == 0, -1e9)
+        scores = scores.masked_fill(window_mask == 0, -1e4)
         if mask is not None:
-            scores = scores.masked_fill(mask == 0, -1e9)
+            scores = scores.masked_fill(mask == 0, -1e4)
         attention = F.softmax(scores, dim=-1)
         attention = self.dropout(attention)
         out = torch.matmul(attention, v).transpose(1, 2).contiguous()

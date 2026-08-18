@@ -59,3 +59,68 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 **Mistake:** Trained agent produced 14.29% accuracy and regurgitated the prompt (`Question: ... BEGIN_THINK`) instead of generating a proper ReAct chain.
 **Why:** Training traces were joined with single spaces in `agent/agent_dataset.py`, so `BEGIN_THINK`/`END_THINK`/actions/observations ran together without line delimiters. The model could not learn structure. Inference also seeded with no newline separators and used `TOOL_RE.search(text)` (first action) instead of the last generated action.
 **Fix:** Changed `_format_trace` to use newline-delimited lines. Updated `agent_loop.py` to seed with `Question: ...\nBEGIN_THINK\n`, append `\nObservation: ...\n` after each tool result, and parse the *last* `Action:` inside the think block. Also expanded `Toolbox.memory` to match evaluation keys and fixed answer extraction to stop at newlines.
+
+## Large agent model loss explosion
+
+**Mistake:** 140M-parameter agent model started training with `loss=344` and stayed above 200.
+**Why:** Tied input/output embeddings combined with AMP fp16 caused the final 1024→256 logit projection to overflow. The byte-level cross-entropy random baseline is ~5.5, so any value >100 means NaN/overflow.
+**Fix:**
+- Untied embeddings by default (`tie_weights=False`) in `model/transformer.py`.
+- Compute final decoder logits in fp32 by casting the last hidden state before `TextDecoder`.
+- Switched trainer AMP from deprecated `torch.cuda.amp` to `torch.amp` API.
+- Guarded `TextDecoder` dropout so it only applies during training.
+- Added scaled Xavier-style weight init (`_init_weights`) for deep/wide stability.
+- Added `make_model` size presets so scaling experiments stay reproducible.
+
+Result: v3b started at `loss≈5.7` and dropped below 0.01 within 2000 steps.
+
+## No causal mask in Transformer
+
+**Mistake:** After the loss explosion was fixed, the 140M agent reached very low training loss but generated complete gibberish during inference (e.g. `Action: calc[10 17]` for `12 + 8`).
+**Why:** `model/transformer.py` had no causal mask, so every position attended to future tokens during training. The model learned to cheat by looking ahead and never learned proper left-to-right generation.
+**Fix:** Added `_causal_mask()` to `Transformer.forward()` so the model only attends to previous positions when no external mask is supplied. Also clipped attention masked values to `-1e4` instead of `-1e9` to avoid fp16 `-inf` saturation in `model/attention.py` and `model/sparse_attention.py`.
+
+Result: after retraining with the causal mask, the agent produced correct single-step ReAct traces and coherent multi-step chains.
+
+## Agent answer extraction
+
+**Mistake:** Agent loop stopped at `END_THINK` and expected an `Answer:` line afterwards, but the model often emitted `END_THINK\nAnswer:` with nothing following, yielding an empty final answer.
+**Why:** The loop returned `text[:end]` up to `END_THINK`, and then tried to extract `Answer:` from a fragment that contained only the header.
+**Fix:** In `agent/agent_loop.py`, when the think block closes after one or more tool actions, return the result of the last executed tool as the answer. This matches how the synthetic training traces are structured and makes tool use the source of truth.
+
+## Multi-step inference required in-loop tool execution
+
+**Mistake:** Multi-step ReAct traces in the dataset were never actually executed at inference time. The loop generated the whole trace at once, hallucinated observations, and stopped at the first `Action:`.
+**Why:** `run_agent` generated a fixed number of tokens, matched actions once, and did not feed real observations back into the model.
+**Fix:** Rewrote `agent/agent_loop.py` to generate incrementally. Whenever a new `Action: tool[arg]` line appears, execution pauses, the real tool is run, the observation is appended to the context, and generation continues from the updated context. The context is retokenised after each observation so the model sees the actual result. `max_new` in `agent/chat.py` was raised to 400 to fit 3-step traces.
+
+Result: the S-size curriculum model now correctly answers single-step and multi-hop questions such as "Add 5 to the version." (→ 5.1) and "Multiply 3 and 4, then add the length of the leader." (→ 16).
+
+## JSON tool-call parser could not handle nested objects
+
+**Mistake:** After migrating to JSON tool calls, the S-size agent generated well-formed `Action: {"tool":"calc","args":{"expr":"..."}}` lines during inference, but `run_agent` never paused to execute them. The eval showed `final_answer` as the raw context and tool `steps` stayed empty.
+**Why:** `_find_unexecuted_action` used the regex `Action:\s*(\{.*?\})`. The lazy `.*?` stops at the first `}`, so for nested objects it captured an unbalanced fragment like `{"tool":"calc","args":{"expr":"..."}` and `json.loads` failed silently.
+**Fix:** Replaced the regex with a balanced-brace scanner (`_find_json_end`) that tracks brace depth while respecting quoted strings. JSON calls now parse correctly and the loop executes tools.
+
+## Agent model underfits JSON + web details on the first full-dataset run
+
+**Status:** Observed on `checkpoints_web/agent_best.pt` after 4k S-size iters.
+**Symptom:** Tools execute, but the model emits wrong calc operands (e.g. `18 + 11` for `12 + 8`) and wrong web queries for some facts. Final accuracy on the 17-question eval battery was 0/17.
+**Why:** A 25M model trained directly on the full mixed dataset (math, memory, date, web, multi-hop web+math) did not converge enough to copy question numbers into the JSON action arguments.
+**Fix plan:**
+- Use a true curriculum: first train on single-step traces only, then resume on multi-step + web-math traces.
+- Add a `--resume-from` argument to `agent/train_agent.py` so resuming can start from a user-chosen checkpoint path.
+- Save the best validation-loss checkpoint instead of the final checkpoint.
+
+## L-size curriculum run stalled/died mid-training
+
+**Status:** Observed, not yet root-caused.
+**Symptom:** `agent_run_v3f.log` stopped at iter 5122/10000 (~51%). Loss was healthy (~0.05) and validation loss was good, but throughput collapsed from ~3.2 it/s to 6-7 s/it right before the process disappeared.
+**Hypotheses:**
+- OOM event during validation/gradient accumulation on the 151M model with batch 16 × accum 8 = effective 128 on a 16GB RTX 5060 Ti.
+- Power/thermal throttling or Windows terminating the background process after sustained load.
+- Checkpoint save at iter 5100 may have coincided with a transient disk/VRAM issue.
+**Next steps:**
+- Restart the L run with a smaller effective batch (e.g. batch 8 × accum 8) or gradient checkpointing.
+- Monitor `nvidia-smi` memory and clock throttling if it stalls again.
+- Save checkpoints more frequently and resume rather than running uninterrupted.

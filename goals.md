@@ -26,11 +26,16 @@
 - [x] Persist all sequence MoE experiment results to `results/`
 - [x] Build a tiny ReAct agent with tools (`calc`, `now`, `search_memory`)
 - [x] Add explicit `BEGIN_THINK`/`END_THINK` internal reasoning to agent traces
-- [ ] Train agentic transformer to basic tool-usage competence (accuracy > 70%)
+- [x] Add checkpoint saving/loading and a chat/test CLI (`agent/chat.py`)
+- [x] Train agentic transformer to basic tool-usage competence (accuracy > 70%)
+- [x] Add curriculum: single-step → multi-step agent traces
+- [x] Persist timestamped snapshots so no experiment is lost
+- [x] Migrate agent tool calls to standard JSON format
+- [x] Add fake `web_search` tool so the LLM must look up facts
 - [ ] Make sequence MoE generate coherent continuations per topic
 - [ ] Train 8K big model to convergence
-- [ ] Add checkpoint saving/loading
 - [ ] Add real validation metrics (perplexity, accuracy)
+- [ ] Scale agent model toward 1B params with MoE/MLA/sparse attention
 
 ## Future goals
 

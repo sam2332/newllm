@@ -31,13 +31,36 @@ Every run writes a timestamped JSON file to `results/`. Keep these files — the
 Agentic tool-use experiments:
 
 ```powershell
-python -m agent.train_agent
+# Watch the latest training run
+python watch_agent.py --log agent_run_web_s.log
+
+# Train a fresh S-size agent with JSON + web_search (writes to checkpoints_web/)
+python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume --checkpoint-dir checkpoints_web > agent_run_web_s.log 2>&1
+
+# Train our current best small agentic model (25M params, curriculum, multi-step)
+python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume > agent_run_best_s.log 2>&1
+
+# Train the larger 151M agentic model (takes ~50 min on RTX 5060 Ti)
+python -u -m agent.train_agent --samples 100000 --iters 10000 --size L --curriculum --no-resume > agent_run_best_l.log 2>&1
+
+# Chat with the best checkpoint
+python -m agent.chat --mode chat
+
+# Chat with the web-search variant
+python -m agent.chat --mode chat --checkpoint checkpoints_web/agent_best.pt
+
+# Run the tool-use test battery
+python -m agent.chat --mode test
+
+# Run the web-search test battery
+python -m agent.chat --mode test --checkpoint checkpoints_web/agent_best.pt
 ```
 
-- Defines `calc`, `now`, `search_memory`, `finish` tools in `agent/tools.py`.
+- Defines `calc`, `now`, `search_memory`, `web_search`, `finish` tools in `agent/tools.py`.
 - Synthetic ReAct training data lives in `agent/agent_dataset.py`.
 - Inference loop with tool execution lives in `agent/agent_loop.py`.
-- Trained model learns to emit `BEGIN_THINK` ... `END_THINK` internal reasoning plus tool calls.
+- Trained model learns to emit `BEGIN_THINK` ... `END_THINK` internal reasoning plus JSON tool calls.
+- Best checkpoints are promoted to `checkpoints/agent_best.pt`; old artifacts live in `archive/`.
 
 ## Project layout
 
