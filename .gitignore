@@ -6,3 +6,9 @@ archive/
 checkpoints/
 checkpoints_web/
 results/
+model/__pycache__/attention.cpython-312.pyc
+model/__pycache__/mla_attention.cpython-312.pyc
+model/__pycache__/sparse_attention.cpython-312.pyc
+model/__pycache__/text_decoder.cpython-312.pyc
+model/__pycache__/text_encoder.cpython-312.pyc
+model/__pycache__/transformer.cpython-312.pyc

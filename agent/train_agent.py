@@ -22,13 +22,20 @@ from sampling import Sampler
 
 
 def make_agent_dataset(num_samples=100000, max_len=512, val_frac=0.05,
-                       simple=True, seed=42):
-    if simple:
+                       simple=True, seed=42, math_only=False):
+    if math_only:
         traces = generate_simple_agent_dataset(num_samples=num_samples,
-                                               max_len=max_len, seed=seed)
+                                               max_len=max_len, seed=seed,
+                                               use_json_tools=True,
+                                               math_only=True)
+    elif simple:
+        traces = generate_simple_agent_dataset(num_samples=num_samples,
+                                               max_len=max_len, seed=seed,
+                                               use_json_tools=True)
     else:
         traces = generate_agent_dataset(num_samples=num_samples,
-                                        max_len=max_len, seed=seed)
+                                        max_len=max_len, seed=seed,
+                                        use_json_tools=True)
     full = StoryDataset(traces, max_len=max_len, max_vocab=256)
     if val_frac <= 0:
         return full, None
@@ -115,19 +122,25 @@ def evaluate_agent(model, cases: list, device: str, toolbox=None):
 def train_agent(num_samples=100000, iters=10000, size="L",
                 attention_type="standard", use_moe=False,
                 checkpoint_dir="checkpoints", resume=True,
-                curriculum=False, save_every=1000):
+                curriculum=False, save_every=1000, lr=3e-4, math_only=False):
     device = get_best_device()
     print(f"\n=== Agent training on {device} ===")
     max_len = 512
 
-    # If curriculum is on, start simple; later reload trainer with multi-step data.
-    # For now we train on the requested dataset type throughout.
+    # Real two-stage curriculum:
+    #   stage 1 (simple=True)  -> single-step math/memory/date/web traces
+    #   stage 2 (simple=False) -> add multi-hop, web+math, memory+math traces
     train_set, val_set = make_agent_dataset(num_samples=num_samples,
                                             max_len=max_len, val_frac=0.05,
-                                            simple=not curriculum)
+                                            simple=not curriculum,
+                                            math_only=math_only)
     print(f"dataset: {len(train_set)} train, {len(val_set or [])} val traces")
-    if curriculum:
-        print("curriculum enabled: multi-step traces included from start")
+    if math_only:
+        print("math-only diagnostic mode")
+    elif curriculum:
+        print("curriculum stage 2: multi-step + web-math traces")
+    else:
+        print("curriculum stage 1: single-step traces only")
 
     model = make_model(max_len=max_len, size=size,
                        attention_type=attention_type, use_moe=use_moe)
@@ -135,7 +148,7 @@ def train_agent(num_samples=100000, iters=10000, size="L",
     # Gradient accum to effective batch ~128 while keeping VRAM low on 16GB.
     batch_size = 16
     grad_accum = 8
-    trainer = Trainer(model, train_set, batch_size=batch_size, lr=3e-4,
+    trainer = Trainer(model, train_set, batch_size=batch_size, lr=lr,
                       max_iters=iters, device=device, val_dataset=val_set,
                       grad_accum_steps=grad_accum, warmup_steps=500,
                       use_amp=True)
@@ -159,8 +172,14 @@ def train_agent(num_samples=100000, iters=10000, size="L",
           f"avg_last_50={avg_last_50:.4f} best_val={best_val:.4f} "
           f"time={elapsed:.1f}s")
 
-    # Save best checkpoint by validation loss
+    # Save best checkpoint by validation loss.
+    # The trainer already restored the best-validation weights, so saving
+    # model.state_dict() here captures the optimal run.
     if val_set is not None:
+        model.save(checkpoint_path)
+        print(f"checkpoint saved to {checkpoint_path}")
+    else:
+        # No validation set: keep the final weights.
         model.save(checkpoint_path)
         print(f"checkpoint saved to {checkpoint_path}")
 
@@ -254,6 +273,10 @@ if __name__ == "__main__":
     parser.add_argument("--curriculum", action="store_true")
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--lr", type=float, default=3e-4,
+                        help="peak learning rate (default 3e-4)")
+    parser.add_argument("--math-only", action="store_true",
+                        help="diagnostic: train only on single-step math traces")
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -267,4 +290,6 @@ if __name__ == "__main__":
         checkpoint_dir=args.checkpoint_dir,
         resume=not args.no_resume,
         curriculum=args.curriculum,
+        lr=args.lr,
+        math_only=args.math_only,
     )

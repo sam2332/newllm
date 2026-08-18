@@ -182,6 +182,10 @@ def run_agent(model, question: str, toolbox: Toolbox,
                 if match:
                     if match.get("json"):
                         call = match["call"]
+                        # Collapse digit words in calc expressions before execution.
+                        if call.get("tool") == "calc" and "expr" in call.get("args", {}):
+                            from agent.tools import _collapse_number_words
+                            call["args"]["expr"] = _collapse_number_words(call["args"]["expr"])
                         result = toolbox.run_json(call)
                         tool_name = call.get("tool", call.get("name", "unknown"))
                         tool_arg = json.dumps(call.get("args", call.get("arguments", {})),
@@ -219,9 +223,11 @@ def run_agent(model, question: str, toolbox: Toolbox,
             thinking, answer = _extract_thinking_answer(generated_text)
             # If there was an action inside, prefer the last tool result as answer.
             if steps:
+                # Convert digit-word results back to normal digits for presentation.
+                from agent.tools import _collapse_number_words
                 return {
                     "thinking": thinking,
-                    "final_answer": str(steps[-1]["result"]),
+                    "final_answer": _collapse_number_words(str(steps[-1]["result"])),
                     "trace": "".join(trace),
                     "steps": steps,
                     "success": True,
@@ -241,9 +247,10 @@ def run_agent(model, question: str, toolbox: Toolbox,
             thinking, answer = _extract_thinking_answer(generated_text)
             if answer:
                 trace.append(generated_text[prefix_len:])
+                from agent.tools import _collapse_number_words
                 return {
                     "thinking": thinking,
-                    "final_answer": answer,
+                    "final_answer": _collapse_number_words(answer),
                     "trace": "".join(trace),
                     "steps": steps,
                     "success": True,
@@ -254,18 +261,20 @@ def run_agent(model, question: str, toolbox: Toolbox,
 
     # Final fallback: use the last tool result if we executed any tools.
     if steps:
+        from agent.tools import _collapse_number_words
         return {
             "thinking": "",
-            "final_answer": str(steps[-1]["result"]),
+            "final_answer": _collapse_number_words(str(steps[-1]["result"])),
             "trace": "".join(trace),
             "steps": steps,
             "success": True,
         }
 
     thinking, answer = _extract_thinking_answer(context)
+    from agent.tools import _collapse_number_words
     return {
         "thinking": thinking,
-        "final_answer": answer if answer else context,
+        "final_answer": _collapse_number_words(answer) if answer else context,
         "trace": "".join(trace),
         "steps": steps,
         "success": bool(answer),

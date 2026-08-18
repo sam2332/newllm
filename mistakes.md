@@ -102,15 +102,35 @@ Result: the S-size curriculum model now correctly answers single-step and multi-
 **Why:** `_find_unexecuted_action` used the regex `Action:\s*(\{.*?\})`. The lazy `.*?` stops at the first `}`, so for nested objects it captured an unbalanced fragment like `{"tool":"calc","args":{"expr":"..."}` and `json.loads` failed silently.
 **Fix:** Replaced the regex with a balanced-brace scanner (`_find_json_end`) that tracks brace depth while respecting quoted strings. JSON calls now parse correctly and the loop executes tools.
 
+## MLA attention fp16 overflow during AMP training
+
+**Mistake:** `live_training_test.py` failed on the `mla` config with `RuntimeError: value cannot be converted to type c10::Half without overflow`.
+**Why:** `model/mla_attention.py` used `scores.masked_fill(mask == 0, -1e9)`; `-1e9` exceeds the `Half` range when AMP autocast is active.
+**Fix:** Changed the masked value to `-1e4`, matching `model/attention.py` and `model/sparse_attention.py`.
+
 ## Agent model underfits JSON + web details on the first full-dataset run
 
-**Status:** Observed on `checkpoints_web/agent_best.pt` after 4k S-size iters.
-**Symptom:** Tools execute, but the model emits wrong calc operands (e.g. `18 + 11` for `12 + 8`) and wrong web queries for some facts. Final accuracy on the 17-question eval battery was 0/17.
-**Why:** A 25M model trained directly on the full mixed dataset (math, memory, date, web, multi-hop web+math) did not converge enough to copy question numbers into the JSON action arguments.
-**Fix plan:**
-- Use a true curriculum: first train on single-step traces only, then resume on multi-step + web-math traces.
-- Add a `--resume-from` argument to `agent/train_agent.py` so resuming can start from a user-chosen checkpoint path.
-- Save the best validation-loss checkpoint instead of the final checkpoint.
+**Status:** In progress — math-only diagnostic for S-size completed; M-size diagnostic running.
+**Symptom:** S-size JSON+web agents consistently score ~23.53% on the eval battery. Basic arithmetic (`12 + 8`, `15 * 4`, `7 * 6`) is almost always wrong, and `web_search` is rarely or never used.
+**Why (current hypothesis):** A 25M model with byte-level tokenization is too small / too data-inefficient to learn multi-task ReAct mapping, including copying numbers from the question into a JSON `calc` expression.
+**Fixes tried:**
+- Implemented a real two-stage curriculum:
+  1. Stage 1: 3k iterations on single-step traces only (math, memory, date, web) with `--lr 3e-4`.
+  2. Stage 2: resume and train for 2k iterations on multi-step + web-math traces with `--lr 1e-4`.
+  - Script: `scripts/train_web_agent_s_curriculum.ps1`.
+- Added `--lr` CLI option to `agent/train_agent.py`.
+- `training/trainer.py` now saves/restores the best-validation checkpoint.
+- `agent/promote.py` now requires the candidate to pass absolute thresholds AND win at least 3 out of 5 metric comparisons against the current best.
+- Implemented **digit-word expansion** (`one two + eight`):
+  - `agent/agent_dataset.py` now spells numbers as words.
+  - `agent/tools.py` and `agent/agent_loop.py` collapse words back to digits.
+  - Script: `scripts/train_web_agent_s_curriculum_words.ps1`.
+  - Result: still ~23.53%. The model produced malformed expressions like `three + one three` and sometimes picked the wrong tool (`now` for math).
+**Diagnostics:**
+- Math-only S-size run (`scripts/train_web_agent_s_math_only.ps1`, 20k samples, 3k iters): loss dropped to ~0.13, but eval accuracy was only 5.88%. The model still failed `12 + 8` (`148`), `15 * 4` (malformed), and `7 * 6` (`84`).
+- Conclusion so far: the 25M model cannot learn arithmetic copying even in isolation. This points to **capacity** or **representation**, not task mixture.
+**Next diagnostic:**
+- M-size math-only run (`scripts/train_web_agent_m_math_only.ps1`) is running. If it succeeds, the problem is capacity and we can scale up. If it fails, the problem is the byte-level representation or copying task and needs a structural fix.
 
 ## L-size curriculum run stalled/died mid-training
 

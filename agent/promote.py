@@ -98,12 +98,59 @@ def run_gate(candidate_path: str, device: str = "cuda", gate: Gate = None):
 
     ok, reasons = gate.passes(acc, per_kind, details)
     if ok:
-        print("\nGATE PASSED")
+        print("\nabsolute thresholds: PASSED")
     else:
-        print("\nGATE FAILED")
+        print("\nabsolute thresholds: FAILED")
         for r in reasons:
             print(f"  - {r}")
     return ok, acc, per_kind, details
+
+
+def _compare_checkpoints(candidate: tuple, best: tuple) -> tuple:
+    """Compare candidate and current best across five promotion checks.
+
+    Returns (wins, checks) where checks is a list of human-readable
+    comparison strings and wins is the number of checks the candidate won.
+    """
+    cand_acc, cand_per_kind, cand_details = candidate
+    best_acc, best_per_kind, best_details = best
+
+    cand_numeric = cand_per_kind.get("numeric", 0.0)
+    best_numeric = best_per_kind.get("numeric", 0.0)
+    cand_exact = cand_per_kind.get("exact", 0.0)
+    best_exact = best_per_kind.get("exact", 0.0)
+
+    # Required questions: all DEFAULT_CASES except date (same as PyTest core).
+    required_qs = {d["question"] for d in DEFAULT_CASES if d.get("kind") != "date"}
+    cand_required = sum(1 for d in cand_details if d["question"] in required_qs and d["ok"])
+    best_required = sum(1 for d in best_details if d["question"] in required_qs and d["ok"])
+    total_required = len(required_qs)
+    cand_required_rate = cand_required / total_required
+    best_required_rate = best_required / total_required
+
+    # Composite robustness score as a 5th check.
+    cand_robust = cand_acc + cand_numeric + cand_exact
+    best_robust = best_acc + best_numeric + best_exact
+
+    checks = [
+        ("overall accuracy", cand_acc, best_acc),
+        ("numeric accuracy", cand_numeric, best_numeric),
+        ("exact accuracy", cand_exact, best_exact),
+        ("required-question pass rate", cand_required_rate, best_required_rate),
+        ("robustness score (overall+numeric+exact)", cand_robust, best_robust),
+    ]
+
+    wins = 0
+    report = []
+    for name, c_val, b_val in checks:
+        won = c_val > b_val
+        if won:
+            wins += 1
+        report.append(
+            f"  {name}: candidate {c_val:.4f} vs best {b_val:.4f} -> "
+            f"{'win' if won else 'loss/tie'}"
+        )
+    return wins, report
 
 
 def promote(
@@ -113,11 +160,43 @@ def promote(
     gate: Gate = None,
     dry_run: bool = False,
 ):
-    """Run gate and, if it passes, copy candidate to best_path."""
+    """Run gate and, if it passes, copy candidate to best_path.
+
+    Promotion checklist:
+    1. Candidate passes absolute thresholds.
+    2. Candidate wins at least 3 out of 5 metric comparisons against the
+       current best checkpoint (or there is no best yet, in which case it
+       automatically clears this check).
+    If both checks pass, the candidate becomes the new best and the old best
+    is kept as a *_prev.pt backup.
+    """
     ok, acc, per_kind, details = run_gate(candidate_path, device=device, gate=gate)
     if not ok:
-        print(f"\nrejecting {candidate_path}; {best_path} was not changed.")
+        print(f"\nrejecting {candidate_path}; absolute thresholds not met.")
         return False
+
+    candidate = (acc, per_kind, details)
+    best_exists = os.path.exists(best_path)
+    if best_exists:
+        print(f"\n=== 5-check competition against current best {best_path} ===")
+        best_model = load_checkpoint(best_path, device=device)
+        best_result = evaluate_agent(best_model, DEFAULT_CASES, device, toolbox=Toolbox())
+        print(f"current best overall accuracy: {best_result[0]:.2%}")
+        for k, v in best_result[1].items():
+            print(f"  {k}: {v:.2%}")
+
+        wins, report = _compare_checkpoints(candidate, best_result)
+        for line in report:
+            print(line)
+        print(f"\nwins: {wins}/5")
+
+        if wins < 3:
+            print(
+                f"\nrejecting {candidate_path}; needs to win at least 3/5 checks "
+                f"against current best, won {wins}/5."
+            )
+            return False
+        print("\ncandidate wins the competition")
 
     if dry_run:
         print(f"\nDRY RUN: would promote {candidate_path} -> {best_path}")
@@ -125,7 +204,7 @@ def promote(
 
     os.makedirs(os.path.dirname(best_path) or ".", exist_ok=True)
     # Keep a backup of the previous best so promotion is reversible.
-    if os.path.exists(best_path):
+    if best_exists:
         backup = best_path.replace(".pt", "_prev.pt")
         shutil.copy2(best_path, backup)
         print(f"backed up previous best to {backup}")

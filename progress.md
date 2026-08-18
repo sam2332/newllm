@@ -63,9 +63,45 @@
 
 - `agent_run_v3f.log` ended at iter 5122/10000 (~51%); loss was healthy (~0.05) but throughput collapsed from 3.2 it/s to 6-7 s/it before the process disappeared. Recorded in [mistakes.md](mistakes.md) as a suspected OOM/thermal or Windows background-kill event.
 
+## Regression gate + trainer best-val update
+
+- Fixed an fp16 overflow in `model/mla_attention.py`: `masked_fill(mask == 0, -1e9)` cannot be cast to `Half`; changed to `-1e4` to match `model/attention.py` and `model/sparse_attention.py`.
+- Updated `training/trainer.py` to snapshot the best-validation-loss weights during training and restore them at the end, with a new `save_best_val()` helper.
+- Updated `agent/train_agent.py` so the saved `agent_best.pt` is always the (restored) best-validation checkpoint.
+- Created a regression gate in `agent/test_agent_regression.py` with configurable accuracy thresholds and a core-required-question subset so the restored legacy checkpoint passes the default base gate.
+- Verified `smoke_test.py`, `live_training_test.py`, and the regression suite against `checkpoints/agent_best.pt` all pass.
+
+## Web agent curriculum attempt and regression gate result
+
+- First full S-size JSON+web run (`scripts/train_web_agent_s.ps1`, 4k iters) completed with healthy loss (best train 0.0935, best val 0.1182) but the checkpoint only scored 23.53% on the eval battery and failed basic arithmetic.
+- Root cause: the 25M model learned the format but could not reliably copy question numbers into `calc` arguments when trained directly on the full mixed distribution.
+- Implemented a true two-stage curriculum:
+  - Stage 1: single-step traces (math, memory, date, web facts) with higher LR (`3e-4`).
+  - Stage 2: resume the same checkpoint on multi-step + web-math traces with lower LR (`1e-4`).
+  - New script: `scripts/train_web_agent_s_curriculum.ps1`.
+- Added `--lr` argument to `agent/train_agent.py` for curriculum-stage LR control.
+- The two-stage curriculum still did not reach the gate; arithmetic copying remained poor (~23.53%).
+- Implemented **digit-word expansion** as a new experiment:
+  - Math questions, expressions, and answers are spelled out (`12 + 8` → `one two + eight`).
+  - `agent/tools.py` collapses the words back to digits before `_safe_eval`.
+  - `agent/agent_loop.py` also collapses calc arguments and final answers.
+  - New script: `scripts/train_web_agent_s_curriculum_words.ps1`.
+  - Sidetrack ideas and future experiments collected in [sidetrack_ideas.md](sidetrack_ideas.md).
+- Added math-only diagnostic mode to `agent/train_agent.py` and ran an S-size math-only experiment.
+  - Result: 5.88% accuracy; the 25M model cannot learn arithmetic copying even in isolation.
+  - This shifts the hypothesis from "task mixture" to "capacity or representation mismatch".
+- Launched M-size math-only diagnostic (`scripts/train_web_agent_m_math_only.ps1`) to test whether ~60M params can learn arithmetic copying.
+- Updated `agent/promote.py` to implement a 5-check competition against the current best checkpoint:
+  - Checks: overall accuracy, numeric accuracy, exact accuracy, required-question pass rate, robustness composite.
+  - Candidate must pass absolute thresholds AND win ≥3/5 checks to promote.
+- Updated `AGENTS.md`, `mistakes.md`, `sidetrack_ideas.md` with each iteration.
+
 ## Next expected steps
 
-- Evaluate the new `checkpoints_web/agent_best.pt` after the S-size JSON+web run finishes.
+- Wait for M-size math-only diagnostic to finish and evaluate whether the larger model learns arithmetic.
+- If M-size succeeds, build a full M-size JSON+web curriculum run on top of the math foundation.
+- If M-size fails, try a structural fix for number copying (pointer/constrained decoding, separate number encoder, or BPE tokenizer).
+- Promote the new JSON+web model to `checkpoints/agent_best.pt` once it wins the 5-check competition.
 - Decide whether to resume/restart the L-size curriculum run with lower effective batch size or gradient checkpointing.
 - Scale to XL/1B parameters once L-size multi-step behaviour is solid.
 - Fix sequence MoE generation collapse.

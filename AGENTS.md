@@ -37,6 +37,14 @@ python watch_agent.py --log agent_run_web_s.log
 # Train a fresh S-size agent with JSON + web_search (writes to checkpoints_web/)
 python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume --checkpoint-dir checkpoints_web > agent_run_web_s.log 2>&1
 
+# Train the same model with a real two-stage curriculum
+#   (single-step foundation, then multi-step + web-math)
+scripts\train_web_agent_s_curriculum.ps1
+
+# Same two-stage curriculum but with digit-word expansion for arithmetic
+# copying (experimental, see sidetrack_ideas.md)
+scripts\train_web_agent_s_curriculum_words.ps1
+
 # Train our current best small agentic model (25M params, curriculum, multi-step)
 python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume > agent_run_best_s.log 2>&1
 
@@ -54,6 +62,22 @@ python -m agent.chat --mode test
 
 # Run the web-search test battery
 python -m agent.chat --mode test --checkpoint checkpoints_web/agent_best.pt
+
+# Regression gate: fail promotion if the candidate does not pass thresholds
+# AND win at least 3 out of 5 metric comparisons against the current best.
+python -m agent.promote --dry-run checkpoints_web/agent_best.pt --best checkpoints/agent_best.pt --min-accuracy 0.85 --min-numeric 0.75 --min-exact 0.85
+
+# Promote a passing checkpoint to the workspace best
+python -m agent.promote checkpoints_web/agent_best.pt --best checkpoints/agent_best.pt --min-accuracy 0.85 --min-numeric 0.75 --min-exact 0.85
+
+# PyTest regression suite (base gate used by CI/default tests)
+python -m pytest agent/test_agent_regression.py -v
+
+# PyTest regression suite including web_search cases
+python -m pytest agent/test_agent_regression.py -v --web
+
+# Unit tests for parsing/tool execution (no model needed)
+python -m pytest agent/test_agent_loop.py -v
 ```
 
 - Defines `calc`, `now`, `search_memory`, `web_search`, `finish` tools in `agent/tools.py`.
@@ -61,6 +85,9 @@ python -m agent.chat --mode test --checkpoint checkpoints_web/agent_best.pt
 - Inference loop with tool execution lives in `agent/agent_loop.py`.
 - Trained model learns to emit `BEGIN_THINK` ... `END_THINK` internal reasoning plus JSON tool calls.
 - Best checkpoints are promoted to `checkpoints/agent_best.pt`; old artifacts live in `archive/`.
+- `agent/promote.py` runs a regression gate before promotion. A candidate must pass absolute thresholds AND win at least 3 out of 5 metric comparisons against the current best (`checkpoints/agent_best.pt`). The old best is kept as `*_prev.pt`.
+- `agent/test_agent_regression.py` is the matching PyTest suite.
+- `training/trainer.py` now saves/restores the best-validation-loss checkpoint instead of the final-iteration weights.
 
 ## Project layout
 

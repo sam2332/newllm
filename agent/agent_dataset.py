@@ -14,6 +14,66 @@ THINK_START = "BEGIN_THINK"
 THINK_END = "END_THINK"
 
 
+# Number expansion helpers -----------------------------------------------------
+# grug: byte tokenizer bad at copying multi-digit numbers. we expand digits
+# to words with space delimiters so the model can copy by words, then collapse
+# back to normal digits at tool time.
+
+_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+
+
+def _number_to_words(n) -> str:
+    """Expand an integer or simple decimal into space-separated digit words.
+
+    Examples: 12 -> "one two", 5.1 -> "five point one".
+    """
+    s = str(n)
+    parts = []
+    for ch in s:
+        if ch == ".":
+            parts.append("point")
+        elif ch == "-":
+            parts.append("minus")
+        elif ch.isdigit():
+            parts.append(_ONES[int(ch)])
+        else:
+            parts.append(ch)
+    return " ".join(parts)
+
+
+def _expr_to_words(expr: str) -> str:
+    """Expand every number in an arithmetic expression to digit words.
+
+    Example: '12 + 8' -> 'one two + eight'.
+    """
+    tokens = []
+    for token in expr.split():
+        try:
+            float(token)
+            tokens.append(_number_to_words(token))
+        except ValueError:
+            tokens.append(token)
+    return " ".join(tokens)
+
+
+def _expr_from_words(expr: str) -> str:
+    """Collapse digit words back to normal numbers for the calc tool."""
+    word_to_digit = {w: str(i) for i, w in enumerate(_ONES)}
+    word_to_digit["point"] = "."
+    word_to_digit["minus"] = "-"
+    result = []
+    for token in expr.split():
+        result.append(word_to_digit.get(token.lower(), token))
+    # Tokens like "one two" become "1 2"; concatenate adjacent digits.
+    out = []
+    for tok in result:
+        if out and tok[0].isdigit() and out[-1][-1].isdigit():
+            out[-1] += tok
+        else:
+            out.append(tok)
+    return " ".join(out)
+
+
 def _format_trace(question: str, steps: list, answer: str, use_json_tools: bool = True) -> str:
     """steps is list of (thought, tool_name, tool_arg, observation).
 
@@ -82,15 +142,18 @@ def _math_question(rng: random.Random, use_json_tools: bool = True):
     else:
         b = max(1, b)
         ans = round(a / b, 4)
+    expr = f"{a} {op} {b}"
+    expr_words = _expr_to_words(expr)
+    ans_words = _number_to_words(ans)
     templates = [
-        f"What is {a} {op} {b}?",
-        f"Calculate {a} {op} {b}.",
-        f"Compute {a} {op} {b}.",
-        f"Tell me the result of {a} {op} {b}.",
+        f"What is {_number_to_words(a)} {op} {_number_to_words(b)}?",
+        f"Calculate {_number_to_words(a)} {op} {_number_to_words(b)}.",
+        f"Compute {_number_to_words(a)} {op} {_number_to_words(b)}.",
+        f"Tell me the result of {_number_to_words(a)} {op} {_number_to_words(b)}.",
     ]
     question = rng.choice(templates)
-    steps = [("I need to use the calculator.", "calc", f"{a} {op} {b}", str(ans))]
-    return _format_trace(question, steps, str(ans), use_json_tools=use_json_tools)
+    steps = [("I need to use the calculator.", "calc", expr_words, ans_words)]
+    return _format_trace(question, steps, ans_words, use_json_tools=use_json_tools)
 
 
 def _memory_question(rng: random.Random, memory: dict, use_json_tools: bool = True):
@@ -184,16 +247,18 @@ def _web_then_math(rng: random.Random, use_json_tools: bool = True):
         ans = numeric * delta
         expr = f"{numeric} * {delta}"
         op_word = "multiply by"
+    expr_words = _expr_to_words(expr)
+    ans_words = _number_to_words(ans)
     templates = [
-        f"What is the {key} {op_word} {delta}?",
-        f"Look up the {key} and {op_word} {delta}.",
+        f"What is the {key} {op_word} {_number_to_words(delta)}?",
+        f"Look up the {key} and {op_word} {_number_to_words(delta)}.",
     ]
     question = rng.choice(templates)
     steps = [
         ("I need to retrieve the web fact first.", "web_search", key, value),
-        ("Now I can combine it with arithmetic.", "calc", expr, str(ans)),
+        ("Now I can combine it with arithmetic.", "calc", expr_words, ans_words),
     ]
-    return _format_trace(question, steps, str(ans), use_json_tools=use_json_tools)
+    return _format_trace(question, steps, ans_words, use_json_tools=use_json_tools)
 
 
 def _multi_hop_question(rng: random.Random, memory: dict, use_json_tools: bool = True):
@@ -211,17 +276,19 @@ def _multi_hop_question(rng: random.Random, memory: dict, use_json_tools: bool =
         ans = a * b * length
         expr = f"{a} * {b} * {length}"
         op_word = "multiply by"
+    expr_words = _expr_to_words(expr)
+    ans_words = _number_to_words(ans)
     templates = [
-        f"Multiply {a} and {b}, then {op_word} the length of the {key}.",
-        f"Compute {a} times {b} and {op_word} the number of characters in the {key}.",
+        f"Multiply {_number_to_words(a)} and {_number_to_words(b)}, then {op_word} the length of the {key}.",
+        f"Compute {_number_to_words(a)} times {_number_to_words(b)} and {op_word} the number of characters in the {key}.",
     ]
     question = rng.choice(templates)
     steps = [
-        ("First I will multiply.", "calc", f"{a} * {b}", str(a * b)),
+        ("First I will multiply.", "calc", _expr_to_words(f"{a} * {b}"), _number_to_words(a * b)),
         ("Then I need the length of the stored value.", "search_memory", key, raw),
-        ("Now combine the results.", "calc", expr, str(ans)),
+        ("Now combine the results.", "calc", expr_words, ans_words),
     ]
-    return _format_trace(question, steps, str(ans), use_json_tools=use_json_tools)
+    return _format_trace(question, steps, ans_words, use_json_tools=use_json_tools)
 
 
 def _memory_then_math(rng: random.Random, memory: dict, use_json_tools: bool = True):
@@ -233,22 +300,27 @@ def _memory_then_math(rng: random.Random, memory: dict, use_json_tools: bool = T
         base = len(raw)
     delta = rng.randint(1, 100)
     ans = base + delta
+    expr = f"{base} + {delta}"
+    expr_words = _expr_to_words(expr)
+    ans_words = _number_to_words(ans)
     templates = [
-        f"Add {delta} to the {key}.",
-        f"What is the {key} plus {delta}?",
+        f"Add {_number_to_words(delta)} to the {key}.",
+        f"What is the {key} plus {_number_to_words(delta)}?",
     ]
     question = rng.choice(templates)
     steps = [
         ("First retrieve the stored value.", "search_memory", key, raw),
-        ("Then add the requested amount.", "calc", f"{base} + {delta}", str(ans)),
+        ("Then add the requested amount.", "calc", expr_words, ans_words),
     ]
-    return _format_trace(question, steps, str(ans), use_json_tools=use_json_tools)
+    return _format_trace(question, steps, ans_words, use_json_tools=use_json_tools)
 
 
-def generate_simple_agent_dataset(num_samples: int = 100000, max_len: int = 512, seed: int = 42, use_json_tools: bool = True):
+def generate_simple_agent_dataset(num_samples: int = 100000, max_len: int = 512, seed: int = 42, use_json_tools: bool = True, math_only: bool = False):
     """Single-step ReAct traces only (math, memory, date, web).
 
-    Each trace is guaranteed short enough that truncation is rarely needed.
+    If math_only=True, generate only single-step math traces.  This is a
+    diagnostic mode to see whether the model can learn arithmetic copying
+    without other tasks competing for capacity.
     """
     rng = random.Random(seed)
     memory = {
@@ -262,11 +334,14 @@ def generate_simple_agent_dataset(num_samples: int = 100000, max_len: int = 512,
     }
     samples = []
     for _ in range(num_samples):
-        kind = rng.choices(
-            ["math", "memory", "date", "web"],
-            weights=[35, 30, 20, 15],
-            k=1,
-        )[0]
+        if math_only:
+            kind = "math"
+        else:
+            kind = rng.choices(
+                ["math", "memory", "date", "web"],
+                weights=[35, 30, 20, 15],
+                k=1,
+            )[0]
         if kind == "math":
             raw = _math_question(rng, use_json_tools=use_json_tools)
         elif kind == "memory":

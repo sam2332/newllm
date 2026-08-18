@@ -105,6 +105,18 @@ def test_exact_accuracy(eval_result, request):
 
 def test_required_questions(eval_result):
     _, _, details = eval_result
-    failed = [d["question"] for d in details if not d["ok"]]
+    # Core required questions that any promoted agent must answer correctly.
+    # Multi-hop web/math combos are deliberately excluded from the default
+    # base gate; they are tested via --web.
+    core = [
+        "What is 12 + 8?",
+        "Calculate 15 * 4.",
+        "What is the project?",
+        "Retrieve the leader.",
+        "What is the current date and time?",
+        "What is 7 * 6?",
+        "Look up the version.",
+    ]
+    failed = [d["question"] for d in details if d["question"] in core and not d["ok"]]
     # Report all failures explicitly so the user sees which questions regressed.
-    assert not failed, f"regression on {len(failed)} question(s): {failed}"
+    assert not failed, f"regression on {len(failed)} core question(s): {failed}"

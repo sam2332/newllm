@@ -15,7 +15,7 @@ class Trainer:
     """
 
     def __init__(self, model, dataset, batch_size: int = 4,
-                 lr: float = 1e-3, device: str = None,
+                 lr: float = 1e-3, device: str | None = None,
                  max_iters: int = 500,
                  val_dataset=None,
                  grad_accum_steps: int = 1,
@@ -53,6 +53,8 @@ class Trainer:
         self.val_history = []
         self.best_loss = float("inf")
         self.best_val_loss = float("inf")
+        self.best_val_step = -1
+        self._best_model_state = None
 
     def _lr_for_step(self, step: int, lr: float):
         """Linear warmup then cosine decay to 0.1 * lr."""
@@ -138,11 +140,34 @@ class Trainer:
             postfix = {"loss": f"{loss:.4f}", "best": f"{self.best_loss:.4f}"}
             if step % 500 == 0 and self.val_loader is not None:
                 vl = self.val_loss()
-                self.val_history.append(vl)
-                self.best_val_loss = min(self.best_val_loss, vl)
-                postfix["val"] = f"{vl:.4f}"
+                if vl is not None:
+                    self.val_history.append(vl)
+                    if vl < self.best_val_loss:
+                        self.best_val_loss = vl
+                        self.best_val_step = step
+                        self._best_model_state = {
+                            k: v.detach().cpu().clone()
+                            for k, v in self.model.state_dict().items()
+                        }
+                    postfix["val"] = f"{vl:.4f}"
             pbar.set_postfix(postfix)
+        # Restore the best validation-loss weights rather than the final ones.
+        if self._best_model_state is not None:
+            self.model.load_state_dict(self._best_model_state)
         return self.history
+
+
+    def save_best_val(self, path: str):
+        """Save the tracked best-validation weights to disk."""
+        if self._best_model_state is None:
+            self._best_model_state = {
+                k: v.detach().cpu().clone()
+                for k, v in self.model.state_dict().items()
+            }
+        torch.save({
+            "model": self._best_model_state,
+            "config": self.model.config if hasattr(self.model, "config") else {},
+        }, path)
 
     def generate(self, prompt: str, max_new: int = 20,
                  tokenizer=None, detokenizer=None,
