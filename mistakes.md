@@ -128,9 +128,11 @@ Result: the S-size curriculum model now correctly answers single-step and multi-
   - Result: still ~23.53%. The model produced malformed expressions like `three + one three` and sometimes picked the wrong tool (`now` for math).
 **Diagnostics:**
 - Math-only S-size run (`scripts/train_web_agent_s_math_only.ps1`, 20k samples, 3k iters): loss dropped to ~0.13, but eval accuracy was only 5.88%. The model still failed `12 + 8` (`148`), `15 * 4` (malformed), and `7 * 6` (`84`).
-- Conclusion so far: the 25M model cannot learn arithmetic copying even in isolation. This points to **capacity** or **representation**, not task mixture.
+- M-size math-only run (`scripts/train_web_agent_m_math_only.ps1`, 60M params): also 5.88% accuracy. The model generated arbitrary expressions like `one - six` for lookup questions.
+- Conclusion so far: **capacity is not the bottleneck**. The 25M and 60M models both learn the tool-call format but cannot ground/copy numbers from the question into the JSON expression. This points to the **representation/format or the copying mechanism**, not task mixture or model size.
 **Next diagnostic:**
-- M-size math-only run (`scripts/train_web_agent_m_math_only.ps1`) is running. If it succeeds, the problem is capacity and we can scale up. If it fails, the problem is the byte-level representation or copying task and needs a structural fix.
+- Single-digit math-only run (`scripts/train_web_agent_s_math_digits.ps1`) completed. The model produced valid single-digit expressions but did **not** copy them from the question (`7 * 6` → `five * two`).
+- This means the failure is not multi-token copying; it is **grounding the expression from the question**. Next experiment: a compact math format `calc(seven * six) = ?` where the target expression is a contiguous marked substring of the question.
 
 ## L-size curriculum run stalled/died mid-training
 

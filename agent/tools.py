@@ -3,50 +3,20 @@
 Tools are declared with a JSON schema so the model can emit standard
 function-call style requests:
 
-    Action: {"tool": "calc", "args": {"expr": "12 + 8"}}
+    {"tool": "calc", "args": {"expr": "12 + 8"}}
 """
 
 import datetime
 import re
 import json
 
-# Number expansion helpers. The model is trained on digit words so it can copy
-# numbers easily with the byte-level tokenizer. We collapse those words back
-# to normal digits before evaluating expressions.
-_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-
-
-def _collapse_number_words(expr: str) -> str:
-    """Convert digit-word tokens back to numeric form.
-
-    Examples: 'one two + eight' -> '12 + 8'.
-    """
-    word_to_digit = {w: str(i) for i, w in enumerate(_ONES)}
-    word_to_digit["point"] = "."
-    word_to_digit["minus"] = "-"
-    result = []
-    for token in expr.split():
-        result.append(word_to_digit.get(token.lower(), token))
-    # Merge adjacent digits: "1 2" -> "12".
-    out = []
-    for tok in result:
-        if out and tok[0].isdigit() and out[-1][-1].isdigit():
-            out[-1] += tok
-        else:
-            out.append(tok)
-    return " ".join(out)
-
 
 def _safe_eval(expr: str) -> str:
     """Evaluate simple arithmetic with + - * / ** and parentheses."""
-    # The model may emit digit words; collapse them first.
-    expr = _collapse_number_words(expr)
     expr = expr.replace("^", "**")
-    # allow only digits, spaces, and operators
     if not re.fullmatch(r"[0-9+\-*/()\.\s\*]*", expr):
         return "ERROR: invalid expression"
     try:
-        # use ast parsing for a bit more safety than raw eval
         import ast
         node = ast.parse(expr, mode="eval")
         allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
@@ -57,14 +27,6 @@ def _safe_eval(expr: str) -> str:
         value = eval(compile(node, "<string>", "eval"),
                      {"__builtins__": {}}, {})
         return str(value)
-    except SyntaxError as e:
-        # common failure mode: the model emits two numbers with no operator
-        # (e.g. "10 17" from token-level decoding confusion). Fall back to
-        # evaluating each numeric token and returning the first valid one.
-        nums = re.findall(r"-?\d+(?:\.\d+)?", expr)
-        if nums:
-            return nums[0]
-        return f"ERROR: {e}"
     except Exception as e:
         return f"ERROR: {e}"
 

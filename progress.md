@@ -90,7 +90,8 @@
 - Added math-only diagnostic mode to `agent/train_agent.py` and ran an S-size math-only experiment.
   - Result: 5.88% accuracy; the 25M model cannot learn arithmetic copying even in isolation.
   - This shifts the hypothesis from "task mixture" to "capacity or representation mismatch".
-- Launched M-size math-only diagnostic (`scripts/train_web_agent_m_math_only.ps1`) to test whether ~60M params can learn arithmetic copying.
+- Launched M-size math-only diagnostic (`scripts/train_web_agent_m_math_only.ps1`); result was 5.88% accuracy — same as S-size. Capacity is not the bottleneck.
+- Added single-digit math-only mode (`--single-digit-math`) to `agent/train_agent.py` and `agent/agent_dataset.py`, plus script `scripts/train_web_agent_s_math_digits.ps1` to test whether the model can copy single-token numbers.
 - Updated `agent/promote.py` to implement a 5-check competition against the current best checkpoint:
   - Checks: overall accuracy, numeric accuracy, exact accuracy, required-question pass rate, robustness composite.
   - Candidate must pass absolute thresholds AND win ≥3/5 checks to promote.
@@ -98,9 +99,9 @@
 
 ## Next expected steps
 
-- Wait for M-size math-only diagnostic to finish and evaluate whether the larger model learns arithmetic.
-- If M-size succeeds, build a full M-size JSON+web curriculum run on top of the math foundation.
-- If M-size fails, try a structural fix for number copying (pointer/constrained decoding, separate number encoder, or BPE tokenizer).
+- Single-digit diagnostic showed the model can generate valid expressions but does not copy them from the question. Next experiment: compact math format `calc(expr) = ?` so the expression is a contiguous marked substring.
+- If compact format succeeds, gradually reintroduce memory/date/web and move to a full M-size run.
+- If compact format fails, add a pointer/constrained decoding mechanism or restructure the trace to reprint numbers near the expression slot.
 - Promote the new JSON+web model to `checkpoints/agent_best.pt` once it wins the 5-check competition.
 - Decide whether to resume/restart the L-size curriculum run with lower effective batch size or gradient checkpointing.
 - Scale to XL/1B parameters once L-size multi-step behaviour is solid.

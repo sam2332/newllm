@@ -1,4 +1,4 @@
-"""Unit tests for the agent ReAct loop.
+"""Unit tests for the JSON message agent loop.
 
 These tests do not need a trained model. They verify that the parser/executor
 wires tools correctly so that future trained models are evaluated on a working
@@ -6,35 +6,43 @@ loop.
 """
 
 import pytest
-from agent.agent_loop import _find_unexecuted_action, _find_json_end, _extract_thinking_answer
+from agent.agent_loop import _extract_assistant_json, _find_unexecuted_action, _find_final_response
 from agent.tools import Toolbox
 
 
-def test_find_json_end_nested():
-    text = 'Action: {"tool":"calc","args":{"expr":"12 + 8"}}'
-    end = _find_json_end(text, text.find("Action:") + len("Action:"))
-    assert end == len(text)
+def test_extract_assistant_json_tool_call():
+    text = '<assistant>{"thought":"compute","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>'
+    start, end, parsed = _extract_assistant_json(text)
+    assert parsed["thought"] == "compute"
+    assert parsed["tool_call"]["name"] == "calc"
 
 
-def test_find_unexecuted_action_json():
-    text = """BEGIN_THINK
-Thought: compute.
-Action: {"tool":"calc","args":{"expr":"12 + 8"}}
-Observation:"""
-    match = _find_unexecuted_action(text, set(), after_pos=text.find("BEGIN_THINK"))
-    assert match is not None
-    assert match["json"] is True
-    assert match["call"] == {"tool": "calc", "args": {"expr": "12 + 8"}}
+def test_extract_assistant_json_response():
+    text = '<assistant>{"thought":"done","response":"20"}</assistant>'
+    start, end, parsed = _extract_assistant_json(text)
+    assert parsed["response"] == "20"
 
 
-def test_find_unexecuted_action_legacy():
-    text = """BEGIN_THINK
-Thought: compute.
-Action: calc[12 + 8]
-Observation:"""
-    match = _find_unexecuted_action(text, set(), after_pos=text.find("BEGIN_THINK"))
-    assert match is not None
-    assert match["json"] is False
+def test_find_unexecuted_action_skips_executed():
+    text = (
+        '<assistant>{"thought":"first","tool_call":{"name":"calc","arguments":{"expr":"1+1"}}}</assistant>'
+        '<tool name=calc>2</tool>'
+        '<assistant>{"thought":"second","tool_call":{"name":"calc","arguments":{"expr":"2+2"}}}</assistant>'
+    )
+    executed = {len(text.split("</assistant>")[0]) + len("</assistant>")}
+    end_pos, parsed, start_pos = _find_unexecuted_action(text, executed)
+    assert parsed is not None
+    assert parsed["tool_call"]["arguments"]["expr"] == "2+2"
+
+
+def test_find_final_response():
+    text = (
+        '<assistant>{"thought":"calc","tool_call":{"name":"calc","arguments":{"expr":"1+1"}}}</assistant>'
+        '<tool name=calc>2</tool>'
+        '<assistant>{"thought":"done","response":"2"}</assistant>'
+    )
+    response, parsed = _find_final_response(text)
+    assert response == "2"
 
 
 def test_toolbox_json_calc():
@@ -60,19 +68,6 @@ def test_toolbox_legacy_web_search():
 def test_toolbox_unknown_tool():
     tb = Toolbox()
     assert tb.run_json({"tool": "nope", "args": {}}).startswith("ERROR")
-
-
-def test_extract_thinking_answer():
-    text = """BEGIN_THINK
-Thought: compute.
-Action: calc[12 + 8]
-Observation: 20
-END_THINK
-Answer: 20"""
-    think, ans = _extract_thinking_answer(text)
-    assert "Thought:" in think
-    assert "Observation: 20" in think
-    assert ans == "20"
 
 
 if __name__ == "__main__":

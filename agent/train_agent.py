@@ -22,20 +22,19 @@ from sampling import Sampler
 
 
 def make_agent_dataset(num_samples=100000, max_len=512, val_frac=0.05,
-                       simple=True, seed=42, math_only=False):
+                       simple=True, seed=42, math_only=False,
+                       single_digit_math=False):
     if math_only:
         traces = generate_simple_agent_dataset(num_samples=num_samples,
                                                max_len=max_len, seed=seed,
-                                               use_json_tools=True,
-                                               math_only=True)
+                                               math_only=True,
+                                               single_digit_math=single_digit_math)
     elif simple:
         traces = generate_simple_agent_dataset(num_samples=num_samples,
-                                               max_len=max_len, seed=seed,
-                                               use_json_tools=True)
+                                               max_len=max_len, seed=seed)
     else:
         traces = generate_agent_dataset(num_samples=num_samples,
-                                        max_len=max_len, seed=seed,
-                                        use_json_tools=True)
+                                        max_len=max_len, seed=seed)
     full = StoryDataset(traces, max_len=max_len, max_vocab=256)
     if val_frac <= 0:
         return full, None
@@ -122,7 +121,8 @@ def evaluate_agent(model, cases: list, device: str, toolbox=None):
 def train_agent(num_samples=100000, iters=10000, size="L",
                 attention_type="standard", use_moe=False,
                 checkpoint_dir="checkpoints", resume=True,
-                curriculum=False, save_every=1000, lr=3e-4, math_only=False):
+                curriculum=False, save_every=1000, lr=3e-4,
+                math_only=False, single_digit_math=False):
     device = get_best_device()
     print(f"\n=== Agent training on {device} ===")
     max_len = 512
@@ -133,9 +133,12 @@ def train_agent(num_samples=100000, iters=10000, size="L",
     train_set, val_set = make_agent_dataset(num_samples=num_samples,
                                             max_len=max_len, val_frac=0.05,
                                             simple=not curriculum,
-                                            math_only=math_only)
+                                            math_only=math_only,
+                                            single_digit_math=single_digit_math)
     print(f"dataset: {len(train_set)} train, {len(val_set or [])} val traces")
-    if math_only:
+    if math_only and single_digit_math:
+        print("math-only diagnostic mode (single-digit operands)")
+    elif math_only:
         print("math-only diagnostic mode")
     elif curriculum:
         print("curriculum stage 2: multi-step + web-math traces")
@@ -277,6 +280,8 @@ if __name__ == "__main__":
                         help="peak learning rate (default 3e-4)")
     parser.add_argument("--math-only", action="store_true",
                         help="diagnostic: train only on single-step math traces")
+    parser.add_argument("--single-digit-math", action="store_true",
+                        help="limit math operands to 0-9 (use with --math-only)")
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -292,4 +297,5 @@ if __name__ == "__main__":
         curriculum=args.curriculum,
         lr=args.lr,
         math_only=args.math_only,
+        single_digit_math=args.single_digit_math,
     )

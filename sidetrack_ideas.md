@@ -17,10 +17,9 @@ These are ideas that came up while trying to make the JSON+web_search S-size age
    - Force the model to copy tokens from the question into the `expr` argument using a pointer network or constrained beam search.
    - More invasive but would guarantee correct expressions.
 
-4. **Increase model capacity (active)**
-   - M-size (~60M) math-only diagnostic is now running: `scripts/train_web_agent_m_math_only.ps1`.
-   - If M-size learns arithmetic, the problem is capacity; we can then re-add tasks on top of an M-size foundation.
-   - If M-size also fails, the problem is the byte-level representation or the copying task itself and we need a structural fix (pointer / constrained decoding / separate number encoder).
+4. **Increase model capacity (tried)**
+   - M-size (~60M) math-only diagnostic completed: 5.88% accuracy, same as S-size.
+   - Larger capacity did **not** fix arithmetic copying. The problem is not model size.
 
 5. **Separate web_search query vocabulary**
    - Give the web_search tool a small set of canonical query strings from the knowledge base instead of free-form natural-language questions.
@@ -36,6 +35,16 @@ These are ideas that came up while trying to make the JSON+web_search S-size age
 8. **Diagnostic eval during training**
    - Add a small fixed eval set that is printed every 500 steps so we can see when arithmetic accuracy starts to improve.
 
-9. **5-check promotion competition (implemented)**
-   - `agent/promote.py` now compares candidate vs current best on 5 checks: overall accuracy, numeric accuracy, exact accuracy, required-question pass rate, and a robustness composite score.
-   - Candidate must pass absolute thresholds AND win ≥3/5 checks to promote. This prevents regressions.
+9. **Single-digit math-only diagnostic (done)**
+   - S-size single-digit math-only run completed: 5.88% overall accuracy (because eval includes unseen multi-digit/memory/web), but it produced valid single-digit expressions.
+   - Crucially, for `What is 7 * 6?` it generated `five * two` → 10, not `seven * six` → 42. It is **not copying from the question**; it learned an expression prior.
+   - This means the problem is not multi-token copying; it's **grounding/copying the expression from the question**.
+
+10. **5-check promotion competition (implemented)**
+    - `agent/promote.py` now compares candidate vs current best on 5 checks: overall accuracy, numeric accuracy, exact accuracy, required-question pass rate, and a robustness composite score.
+    - Candidate must pass absolute thresholds AND win ≥3/5 checks to promote. This prevents regressions.
+
+11. **Structural fixes (active)**
+    - Add a compact math format where the question literally contains the expression, e.g. `calc(seven * six) = ?`. The target `expr` is exactly `seven * six` so the model only has to copy the substring inside the parentheses. This tests whether the model can copy when the expression is contiguous and clearly marked.
+    - If that still fails, try pointer / constrained decoding for `calc` expr.
+    - If that fails, consider a separate number encoder or BPE tokenizer.

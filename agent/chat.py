@@ -1,26 +1,18 @@
 """Load a trained agent checkpoint and chat or test tool use."""
 
 import argparse
-import json
 import os
-import re
 import torch
 
 from model.transformer import Transformer
-from agent.agent_loop import run_agent
+from agent.agent_loop import run_agent, EOT
 from agent.tools import Toolbox
 from sampling import Sampler
-
-
-THINK_START = "BEGIN_THINK"
-THINK_END = "END_THINK"
-EOT = "\x03"
 
 
 def load_checkpoint(path: str, device: str = "cuda") -> Transformer:
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     cfg = ckpt.get("config", {})
-    # Infer anything missing from the saved weights
     sd = ckpt["model"]
     vocab_size = cfg.get("vocab_size", 256)
     d_model = cfg.get("d_model", 1024)
