@@ -92,6 +92,9 @@ def main():
                     help="deep chains run past 12 hops; too low "
                          "scores them 0 by construction")
     ap.add_argument("--max-new", type=int, default=256)
+    ap.add_argument("--constrained", action="store_true",
+                    help="mask logits to the schema's grammar, so a tool name "
+                         "absent from this trace's schema cannot be emitted")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -121,6 +124,7 @@ def main():
         hops_total[bucket] = hops_total.get(bucket, 0) + 1
         r = run_agent(model, question, tb, device=args.device, greedy=True,
                       tokenizer=TOK, system=system,
+                      constrained=args.constrained,
                       max_steps=args.max_steps, max_new=args.max_new)
         # Two things count as the model's answer, and they are different
         # strings. final_answer is the raw tool result (_select_final_answer
