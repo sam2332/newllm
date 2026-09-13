@@ -3,7 +3,14 @@
 __pycache__/
 .venv/
 archive/
-checkpoints/
-checkpoints_web/
+
+# Checkpoints are hundreds of MB each; keep them out of git.
+checkpoints*/
+*.pt
+*.resume
+*.resume.tmp
+
 results/
 
+# data/ IS tracked: ollama_pool.json and sandbox_pool.json are small
+# (~110KB) and expensive to regenerate, so they are worth versioning.
