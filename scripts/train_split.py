@@ -112,6 +112,11 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--build-workers", type=int, default=48,
                     help="processes used to build the dataset")
+    ap.add_argument("--dataset-cache", default=None,
+                    help="load this prebuilt cache file directly instead of "
+                         "deriving the path from the generation parameters. "
+                         "Use when the args that produced an existing cache "
+                         "are no longer known; a 250k/16k build costs ~20 min.")
     ap.add_argument("--scenarios", default="data/scenarios.json",
                     help="teacher-written scenario plans")
     ap.add_argument("--scenario-fraction", type=float, default=0.0,
@@ -175,7 +180,11 @@ def main():
         deep_fraction=args.deep_fraction, deep_min=args.deep_min,
         deep_max=args.deep_max, max_len=max_len, seed=args.seed,
         workers=args.build_workers)
-    if ddp:
+    if args.dataset_cache:
+        if is_main:
+            print(f"loading prebuilt dataset: {args.dataset_cache}", flush=True)
+        samples_data = torch.load(args.dataset_cache, weights_only=False)
+    elif ddp:
         if is_main:
             samples_data = build_dataset(verbose=True, **build_kwargs)
             dist.barrier()
