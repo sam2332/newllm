@@ -15,13 +15,17 @@ import json
 def _safe_eval(expr: str) -> str:
     """Evaluate simple arithmetic with + - * / ** and parentheses."""
     expr = expr.replace("^", "**")
-    if not re.fullmatch(r"[0-9+\-*/()\.\s\*]*", expr):
+    if not re.fullmatch(r"[0-9+\-*/()\.\s\*%]*", expr):
         return "ERROR: invalid expression"
     try:
         import ast
         node = ast.parse(expr, mode="eval")
+        # ast.UnaryOp was allowed but its operators were not, so any negative
+        # number ("-7 - 25") was rejected as an invalid expression. That broke
+        # every multi-step chain whose running total went below zero.
         allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
-                   ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)
+                   ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow,
+                   ast.USub, ast.UAdd, ast.Mod, ast.FloorDiv)
         for n in ast.walk(node):
             if not isinstance(n, allowed):
                 return "ERROR: invalid expression"
