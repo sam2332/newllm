@@ -33,7 +33,9 @@ class Trainer:
                  ddp: bool = False,
                  eval_fn=None,
                  eval_every: int = 0,
-                 eval_patience: int = 4):
+                 eval_patience: int = 4,
+                 max_minutes: float = 0.0,
+                 val_batches: int = 0):
         if device is None:
             device = get_best_device()
         self.model = model.to(device)
@@ -108,6 +110,16 @@ class Trainer:
         self.eval_every = eval_every
         self.eval_patience = eval_patience
         self.eval_history = []
+        # Wall-clock budget for one segment. Training is split into short runs
+        # because sustained dual-GPU draw trips the breaker; a segment stops on
+        # time, writes resume state and exits 0, and the next one continues.
+        self.max_minutes = max_minutes
+        self.stopped_on_time = False
+        # A full validation pass is 12.5k forward passes and costs minutes. It
+        # runs 24 times in a 12k-iteration run, which is longer than the
+        # training itself. Cap it; a fixed subset is still a valid comparison
+        # because val_loader does not shuffle.
+        self.val_batches = val_batches
         self.best_acc = -1.0
         self.best_acc_step = -1
         self._best_acc_state = None
@@ -133,7 +145,13 @@ class Trainer:
             print(f"no resume state at {resume_path}; starting from scratch")
             return
         state = torch.load(resume_path, map_location="cpu", weights_only=False)
-        self.model.load_state_dict(state["model"])
+        # Saved from the unwrapped module, so it loads whether or not this
+        # process is running under DDP. Older resume files were written from
+        # the DDP wrapper and carry a "module." prefix; strip it.
+        weights = state["model"]
+        if any(k.startswith("module.") for k in weights):
+            weights = {k.removeprefix("module."): v for k, v in weights.items()}
+        self._unwrapped().load_state_dict(weights)
         self.model.to(self.device)
         self.optimizer.load_state_dict(state["optimizer"])
         if state.get("scaler") and self.scaler.is_enabled():
@@ -145,8 +163,18 @@ class Trainer:
         self.best_val_step = state.get("best_val_step", -1)
         self.best_loss = state.get("best_loss", float("inf"))
         self._best_model_state = state.get("best_model_state")
+        # Without these the next segment starts at best_acc = -1, so its first
+        # evaluation always counts as an improvement and overwrites a better
+        # _bestacc.pt from an earlier segment - and early stopping restarts its
+        # patience count from zero every time.
+        self.best_acc = state.get("best_acc", -1.0)
+        self.best_acc_step = state.get("best_acc_step", -1)
+        self.eval_history = state.get("eval_history", [])
+        self._best_acc_state = state.get("best_acc_state")
         print(f"resumed from step {self.start_step} "
-              f"(best_val={self.best_val_loss:.4f})")
+              f"(best_val={self.best_val_loss:.4f}"
+              + (f", best_acc={self.best_acc:.1%} @ {self.best_acc_step}"
+                 if self.best_acc >= 0 else "") + ")")
 
     def _run_eval(self, step: int, pbar=None):
         """Score the task battery; keep the best weights. Returns True to stop.
@@ -215,7 +243,7 @@ class Trainer:
         target = self.checkpoint_path + ".resume"
         tmp = target + ".tmp"
         torch.save({
-            "model": self.model.state_dict(),
+            "model": self._unwrapped().state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scaler": self.scaler.state_dict() if self.scaler.is_enabled() else None,
             "step": step,
@@ -225,6 +253,10 @@ class Trainer:
             "best_val_step": self.best_val_step,
             "best_loss": self.best_loss,
             "best_model_state": self._best_model_state,
+            "best_acc": self.best_acc,
+            "best_acc_step": self.best_acc_step,
+            "eval_history": self.eval_history,
+            "best_acc_state": self._best_acc_state,
             "config": self._unwrapped()._get_config()
             if hasattr(self._unwrapped(), "_get_config") else {},
         }, tmp)
@@ -300,7 +332,9 @@ class Trainer:
         self.model.eval()
         total = 0.0
         count = 0
-        for x, y, mask in self.val_loader:
+        for i, (x, y, mask) in enumerate(self.val_loader):
+            if self.val_batches and i >= self.val_batches:
+                break
             x, y, mask = x.to(self.device), y.to(self.device), mask.to(self.device)
             with torch.amp.autocast("cuda", enabled=self.use_amp,
                                     dtype=self.amp_dtype):
@@ -311,6 +345,9 @@ class Trainer:
         return total / count if count else None
 
     def train(self):
+        import time
+        t_start = time.time()
+        budget = self.max_minutes * 60 if self.max_minutes else 0
         data_iter = iter(self.loader)
         pbar = tqdm(range(self.start_step, self.max_iters), desc="training",
                     initial=self.start_step, total=self.max_iters)
@@ -350,9 +387,22 @@ class Trainer:
                     and step % self.eval_every == 0:
                 if self._run_eval(step, pbar):
                     break
+
+            # Stop on the wall-clock budget rather than being killed, so the
+            # resume state on disk is the step we actually reached.
+            if budget and time.time() - t_start >= budget:
+                self.stopped_on_time = True
+                self._save_resume_state(step)
+                elapsed = (time.time() - t_start) / 60
+                print(f"\n  time budget reached at step {step} "
+                      f"({elapsed:.1f} min); resume state written",
+                      flush=True)
+                break
         # Prefer the best *accuracy* weights when a task eval was running;
         # fall back to best validation loss otherwise.
         target = self._unwrapped()
+        if self.stopped_on_time:
+            return self.history
         if self._best_acc_state is not None:
             target.load_state_dict(self._best_acc_state)
             print(f"restored best-accuracy weights: {self.best_acc:.1%} "

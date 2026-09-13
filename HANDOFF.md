@@ -276,3 +276,70 @@ Unprivileged attempts fail with "Insufficient Permissions".
 - Git has been corrupted once by a power cut (a zero-byte object left HEAD
   unreachable). It was recoverable from the reflog. Run `git fsck` after any
   hard reboot before trusting the repo.
+
+## Short segmented runs (power-limited operation)
+
+The GPUs are now capped below stock because sustained draw was tripping a fuse:
+
+| GPU | cap | stock |
+|-----|-----|-------|
+| RTX 4090 (0) | 350 W | 450 W |
+| RTX 5090 (1) | 450 W | 575 W |
+
+**Measured, single GPU, the M instruct config (`--batch-size 2 --grad-accum 8
+--grad-checkpoint`, `max_len` 16384):**
+
+- 127 ms per micro-step, 2.7 GiB peak, **341 W** - under the 350 W cap already.
+- 12,000 iterations is **~25 minutes of compute**, not hours.
+
+The "466 hours" in the old log was step 0 only, and step 0 includes a full
+validation pass. The wall clock was never dominated by training:
+
+- validation is 12,499 samples at batch 2, ~4 min, and ran every 500 steps -
+  roughly an hour per run, more than the training itself. Use `--val-batches`.
+- the dataset cache is 6.4 GB and takes ~96 s to load, per rank.
+
+Larger batches are *slower* here, because `collate_pad` pads to the longest
+sequence in the batch and the length distribution is very wide (p50 1624,
+p95 6761, p100 14584). One outlier drags the whole batch to its length:
+
+| config | opt-steps/hr | peak mem | power |
+|--------|--------------|----------|-------|
+| bs=2 accum=8  | 3,541 | 2.7 GiB | 341 W |
+| bs=8 accum=2  | 2,748 | 12.1 GiB | 450 W |
+| bs=16 accum=1 | 2,315 | 17.7 GiB | 450 W |
+
+Keep `--batch-size 2 --grad-accum 8`.
+
+### Running in segments
+
+`--max-minutes N` stops a segment cleanly on the wall clock: it writes resume
+state, prints the step it reached and exits 0. **Keep `--iters` identical across
+segments** - it is the denominator of the cosine LR schedule, so raising it
+between segments rewrites the schedule mid-run. A segment that stopped on time
+does not overwrite `agent_best.pt` or `run.json`; the resume state is the
+artifact.
+
+```bash
+while ! grep -q "saved ->" logs/seg.log 2>/dev/null; do
+  CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/train_split.py \
+    --mode instruct --size M --batch-size 2 --grad-accum 8 \
+    --grad-checkpoint --iters 12000 --val-batches 50 \
+    --save-every 250 --max-minutes 20 --resume \
+    --out checkpoints_schema_M >> logs/seg.log 2>&1 || break
+done
+```
+
+Three bugs made segmented runs unsafe before this; all three are fixed:
+
+1. `_save_resume_state` wrote `self.model.state_dict()`, which under DDP carries
+   a `module.` prefix. A run started with `torchrun` could not be resumed on one
+   GPU - exactly the move the power problem forces. It now saves from the
+   unwrapped module and strips the prefix from older files on load.
+2. Accuracy state (`best_acc`, `best_acc_step`, `eval_history`,
+   `_best_acc_state`) was neither saved nor restored. Every segment restarted at
+   `best_acc = -1`, so its first evaluation always counted as an improvement and
+   overwrote `agent_best_bestacc.pt` with worse weights, and early-stopping
+   patience reset to zero each segment.
+3. `train_split.py` deleted the `.resume` file whenever `train()` returned. With
+   a time-budget stop that would have deleted the state the next segment needs.

@@ -131,6 +131,12 @@ def main():
                     help="write resumable state every N iterations (0 = off)")
     ap.add_argument("--resume", action="store_true",
                     help="continue from <out>/agent_best.pt.resume if present")
+    ap.add_argument("--max-minutes", type=float, default=0.0,
+                    help="stop this segment after N minutes, write resume "
+                         "state and exit 0 (0 = run to --iters)")
+    ap.add_argument("--val-batches", type=int, default=0,
+                    help="limit the validation pass to N batches (0 = all); "
+                         "a full pass over 12.5k samples costs minutes")
     ap.add_argument("--init-checkpoint", default=None,
                     help="warm-start from another checkpoint (e.g. train chat "
                          "from the finished instruct model)")
@@ -255,7 +261,9 @@ def main():
                       save_every=args.save_every if is_main else 0,
                       resume=args.resume, ddp=ddp,
                       eval_fn=eval_fn, eval_every=args.eval_every,
-                      eval_patience=args.eval_patience)
+                      eval_patience=args.eval_patience,
+                      max_minutes=args.max_minutes,
+                      val_batches=args.val_batches)
     print(f"batch={args.batch_size} x {args.grad_accum} "
           f"(effective {args.batch_size * args.grad_accum}) lr={args.lr}")
 
@@ -267,6 +275,15 @@ def main():
         dist.barrier()
     if not is_main:
         dist.destroy_process_group()
+        return
+    if trainer.stopped_on_time:
+        # Not finished. The resume state is the artifact; leave agent_best.pt
+        # and run.json alone so they keep describing the last complete run.
+        print(f"segment stopped on time after {dt/60:.1f} min; "
+              f"resume with the same command to continue "
+              f"(--iters {args.iters} unchanged)")
+        if ddp:
+            dist.destroy_process_group()
         return
     # Unwrap DDP before saving so the checkpoint has plain parameter names.
     to_save = model.module if isinstance(model, DistributedDataParallel) else model
