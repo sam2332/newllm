@@ -25,24 +25,76 @@ from agent.tools import Toolbox
 from agent.repo_tools import attach_repo_tools
 
 EOT = "\x03"
-_NUM = re.compile(r"-?\d+(?:\.\d+)?")
+# Must handle scientific notation: generated physics facts look like
+# "9.578833205e7 C/kg", and a regex without an exponent clause reads that as
+# the two numbers 9.5788 and 7. The chain then computes correctly from
+# 95788332.05 while the verifier, unable to see that value anywhere, reports a
+# hallucination. A false alarm on correct behaviour is the failure mode that
+# gets a safety check disabled.
+_NUM = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
 
 
 def numbers_in(text: str) -> set:
     """Numeric literals appearing in a piece of text, normalized."""
-    out = set()
+    return set(numbers_in_order(text))
+
+
+def numbers_in_order(text: str) -> list:
+    """Numeric literals in order of appearance.
+
+    Order matters: a tool result's *first* number is its answer. Taking
+    ``sorted(numbers_in(x))[0]`` sorts normalized STRINGS lexicographically,
+    so "1000" sorts before "9", and the chain silently continues from the
+    wrong operand.
+    """
+    out = []
     for m in _NUM.finditer(str(text)):
         try:
             v = float(m.group(0))
         except ValueError:
             continue
-        out.add(_canon(v))
+        out.append(_canon(v))
     return out
 
 
+def floats_in_order(text: str) -> list:
+    """Numeric literals as floats, in order of appearance."""
+    out = []
+    for m in _NUM.finditer(str(text)):
+        try:
+            out.append(float(m.group(0)))
+        except ValueError:
+            continue
+    return out
+
+
+def _is_grounded(value: float, pool, rel_tol: float = 1e-6) -> bool:
+    """Numeric membership with tolerance.
+
+    Comparing formatted strings is fragile in both directions: rounding to a
+    fixed number of decimals collapses 1.6e-19 to 0.0, and full precision makes
+    95788332.15 and 95788332.150001 look like different values. Compare as
+    numbers instead.
+    """
+    for known in pool:
+        if value == known:
+            return True
+        scale = max(abs(value), abs(known), 1e-12)
+        if abs(value - known) / scale <= rel_tol:
+            return True
+    return False
+
+
 def _canon(v) -> str:
+    """Format a number for an expression without losing magnitude.
+
+    round(x, 4) turns 1.6e-19 into 0.0, which both corrupts the arithmetic and
+    makes the value unverifiable. Use significant digits instead.
+    """
     f = float(v)
-    return str(int(f)) if f.is_integer() else str(round(f, 4))
+    if f.is_integer() and abs(f) < 1e15:
+        return str(int(f))
+    return f"{f:.10g}"
 
 
 class GroundingError(ValueError):
@@ -65,22 +117,22 @@ class DeepChainBuilder:
     def start(self, question: str):
         self.messages = [{"role": "user", "content": question}]
         # Numbers stated in the question are legitimately available.
-        self.grounded = set(numbers_in(question))
+        self.grounded = list(floats_in_order(question))
         self.last = None
         return self
 
     def _assert_grounded(self, args: dict):
         """Refuse any argument value not already visible in the transcript."""
         for value in args.values():
-            for n in numbers_in(value):
-                if n not in self.grounded:
+            for n in floats_in_order(value):
+                if not _is_grounded(n, self.grounded):
                     raise GroundingError(
-                        f"value {n} in {args!r} is not grounded; "
-                        f"available: {sorted(self.grounded)[:8]}")
+                        f"value {_canon(n)} in {args!r} is not grounded")
 
     def step(self, tool: str, args: dict, situation: str, fallback: str):
         """Run one tool stage. Raises GroundingError if args are ungrounded."""
-        self._assert_grounded(args)
+        if tool in DATAFLOW_TOOLS:
+            self._assert_grounded(args)
         observation = self.tb.run_json({"tool": tool, "args": args})
         if str(observation).startswith("ERROR") or observation == "no results found":
             raise GroundingError(f"tool {tool} failed: {observation}")
@@ -91,7 +143,7 @@ class DeepChainBuilder:
         self.messages.append({"role": "tool", "name": tool,
                               "content": str(observation)})
         # The observation is now legitimately available to later stages.
-        self.grounded |= numbers_in(observation)
+        self.grounded.extend(floats_in_order(observation))
         self.last = str(observation)
         return observation
 
@@ -133,68 +185,105 @@ def arithmetic_pipeline(builder: DeepChainBuilder, hops: int) -> list:
 
 def lookup_pipeline(builder: DeepChainBuilder, hops: int, facts: dict,
                     memory: dict) -> list:
-    """Alternating lookups and arithmetic; every operand comes from a tool."""
+    """Alternating lookups and arithmetic; every operand comes from a tool.
+
+    The operations are stated in the question up front. An earlier version drew
+    the constants randomly without mentioning them, which meant the only way to
+    produce the trace was to invent numbers - exactly the behaviour this module
+    exists to prevent. The verifier caught it on 600 of 3000 traces.
+    """
     rng = builder.rng
-    numeric_facts = [k for k, v in facts.items() if numbers_in(v)]
-    numeric_mem = [k for k, v in memory.items() if numbers_in(v)]
+    numeric_facts = [k for k, v in facts.items() if floats_in_order(v)]
+    numeric_mem = [k for k, v in memory.items() if floats_in_order(v)]
     if not numeric_facts:
         return arithmetic_pipeline(builder, hops)
 
     first_key = rng.choice(numeric_facts)
     stages = max(1, hops - 1)
-    builder.start(
-        f"Look up the {first_key}, then run {stages} follow-up operations on "
-        f"the value, using tools for every step.")
-    obs = builder.step("web_search", {"query": first_key},
-                       "web_call", f"First I need the {first_key}.")
-    nums = sorted(numbers_in(obs))
-    if not nums:
-        raise GroundingError("first lookup returned no number")
-    current = float(nums[0])
 
+    # Plan every stage before writing the question, so the question can state
+    # each constant and each additional lookup the chain will use.
+    plan = []
     for i in range(stages):
-        # Every few stages, pull another real value from a tool and combine.
         if i % 3 == 2 and (numeric_facts or numeric_mem):
             if numeric_mem and rng.random() < 0.5:
-                key = rng.choice(numeric_mem)
-                o2 = builder.step("search_memory", {"key": key},
-                                  "memory_call", f"I also need the {key}.")
+                plan.append(("mem", rng.choice(numeric_mem)))
             else:
-                key = rng.choice(numeric_facts)
-                o2 = builder.step("web_search", {"query": key},
-                                  "web_call", f"I also need the {key}.")
-            other = sorted(numbers_in(o2))
-            if not other:
-                continue
-            expr = f"{_canon(current)} + {other[0]}"
+                plan.append(("web", rng.choice(numeric_facts)))
         else:
             op = rng.choice(["+", "-", "*"])
             k = rng.randint(2, 9) if op == "*" else rng.randint(1, 30)
-            # k is a constant the model states, and it appears in the user's
-            # question only for arithmetic_pipeline. Ground it explicitly by
-            # treating small literals as allowed: register before use.
-            builder.grounded.add(_canon(k))
+            plan.append(("op", (op, k)))
+
+    described = []
+    for kind, payload in plan:
+        if kind == "op":
+            op, k = payload
+            word = {"+": "add", "-": "subtract", "*": "multiply by"}[op]
+            described.append(f"{word} {k}")
+        elif kind == "mem":
+            described.append(f"add the stored {payload}")
+        else:
+            described.append(f"add the {payload}")
+    question = (f"Look up the {first_key}, then {', then '.join(described)}. "
+                f"Use a tool for every step.")
+
+    builder.start(question)
+    obs = builder.step("web_search", {"query": first_key},
+                       "web_call", f"First I need the {first_key}.")
+    nums = floats_in_order(obs)
+    if not nums:
+        raise GroundingError("first lookup returned no number")
+    current = nums[0]
+
+    for kind, payload in plan:
+        if kind == "op":
+            op, k = payload
             expr = f"{_canon(current)} {op} {k}"
+        else:
+            if kind == "mem":
+                other_obs = builder.step("search_memory", {"key": payload},
+                                         "memory_call",
+                                         f"I also need the stored {payload}.")
+            else:
+                other_obs = builder.step("web_search", {"query": payload},
+                                         "web_call",
+                                         f"I also need the {payload}.")
+            other = floats_in_order(other_obs)
+            if not other:
+                continue
+            expr = f"{_canon(current)} + {_canon(other[0])}"
         out = builder.step("calc", {"expr": expr}, "chain_first",
                            f"Combine into {expr}.")
-        current = float(sorted(numbers_in(out))[0]) if numbers_in(out) else current
+        got = floats_in_order(out)
+        if got:
+            current = got[0]
     return builder.finish("chain_last", "The chain is complete.")
 
 
 # ------------------------------------------------------------- verification
 
-def verify_trace(text: str) -> tuple:
-    """Check that every tool argument is grounded in what came before it.
+# Grounding is only meaningful where a numeric argument is a DATA-FLOW claim:
+# the model asserting "this is the value the previous step produced". In a code
+# snippet or a line range, a number is part of an instruction, not a claim about
+# prior output, and demanding it appear earlier flags correct behaviour. A
+# verifier that cries wolf gets switched off, so it checks only what it can
+# meaningfully check.
+DATAFLOW_TOOLS = frozenset({"calc"})
+
+
+def verify_trace(text: str, dataflow_tools=DATAFLOW_TOOLS) -> tuple:
+    """Check that data-flow tool arguments are grounded in what came before.
 
     Returns (ok, problems). Used both as a dataset gate and as an inference
     guard: if the model invents a number at hop 30, this catches it instead of
     letting it silently poison the rest of the chain.
     """
     problems = []
-    grounded = set()
+    grounded = []
     first_user = re.search(r"<user>(.*?)</user>", text, re.S)
     if first_user:
-        grounded |= numbers_in(first_user.group(1))
+        grounded.extend(floats_in_order(first_user.group(1)))
 
     pattern = re.compile(
         r'"tool_call":\{"name":"(\w+)","arguments":(\{.*?\})\}\}</assistant>'
@@ -206,12 +295,13 @@ def verify_trace(text: str) -> tuple:
         except json.JSONDecodeError:
             problems.append(f"hop {i}: unparseable arguments")
             continue
-        for value in args.values():
-            for n in numbers_in(value):
-                if n not in grounded:
-                    problems.append(
-                        f"hop {i} ({name}): value {n} not grounded in prior "
-                        f"context")
+        if name in dataflow_tools:
+            for value in args.values():
+                for n in floats_in_order(value):
+                    if not _is_grounded(n, grounded):
+                        problems.append(
+                            f"hop {i} ({name}): value {_canon(n)} not grounded "
+                            f"in prior context")
         if observation is not None:
-            grounded |= numbers_in(observation)
+            grounded.extend(floats_in_order(observation))
     return (not problems), problems

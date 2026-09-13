@@ -18,6 +18,8 @@ import random
 from agent.tools import Toolbox
 from agent.repo_tools import attach_repo_tools, describe_symbol, REPO_TOOL_SPECS
 from agent.sandbox_tools import SANDBOX_TOOL_SPECS
+from agent.deep_chains import (DeepChainBuilder, arithmetic_pipeline,
+                               lookup_pipeline, GroundingError, verify_trace)
 from agent.chat_dataset import serialize_chat, SYSTEM_PROMPTS
 
 EOT = "\x03"
@@ -347,6 +349,23 @@ class TraceComposer:
         return msgs
 
 
+    # ------------------------------------------------------ deep chains
+    def deep_chain(self, hops: int):
+        """An N-hop chain where every stage consumes the previous result.
+
+        Grounding is asserted stage by stage, so a trace that could only be
+        produced by inventing a value is never emitted as training data.
+        """
+        builder = DeepChainBuilder(self.toolbox, self.rng,
+                                   thought_fn=self.thought)
+        try:
+            if self.numeric_facts and self.rng.random() < 0.45:
+                return lookup_pipeline(builder, hops, self.facts, self.memory)
+            return arithmetic_pipeline(builder, hops)
+        except GroundingError:
+            self.dropped += 1
+            return None
+
     # ------------------------------------------------- three-tool chains
     def _chain(self, question, stages, think_names):
         """Build an N-stage trace. Every observation comes from the Toolbox."""
@@ -637,18 +656,30 @@ def _serialize_instruct(messages) -> str:
 
 def generate(pool: dict, num_samples: int, mode: str = "instruct",
              max_len: int = 768, seed: int = 42,
-             system_prob: float = 0.4) -> tuple:
-    """Return (traces, stats). ``mode`` is 'instruct' or 'chat'."""
+             system_prob: float = 0.4,
+             deep_fraction: float = 0.0,
+             deep_min: int = 4, deep_max: int = 12,
+             verify: bool = True) -> tuple:
+    """Return (traces, stats). ``mode`` is 'instruct', 'chat' or 'deep'.
+
+    ``deep_fraction`` mixes in N-hop chains with N drawn from
+    [deep_min, deep_max]. Depth is a curriculum knob: a model that has only
+    seen 3 hops cannot plan 40, so training ramps the range upward.
+    """
     comp = TraceComposer(pool, seed=seed)
-    patterns = INSTRUCT_PATTERNS if mode == "instruct" else CHAT_PATTERNS
+    patterns = INSTRUCT_PATTERNS if mode != "chat" else CHAT_PATTERNS
     names = [n for n, _ in patterns]
     weights = [w for _, w in patterns]
-    traces, too_long = [], 0
+    traces, too_long, ungrounded = [], 0, 0
     kept_by = collections.Counter()
     dropped_by = collections.Counter()
     while len(traces) < num_samples:
-        name = comp.rng.choices(names, weights=weights, k=1)[0]
-        messages = getattr(comp, name)()
+        if deep_fraction and comp.rng.random() < deep_fraction:
+            name = "deep_chain"
+            messages = comp.deep_chain(comp.rng.randint(deep_min, deep_max))
+        else:
+            name = comp.rng.choices(names, weights=weights, k=1)[0]
+            messages = getattr(comp, name)()
         if not messages:
             continue
         if mode == "chat":
@@ -661,6 +692,15 @@ def generate(pool: dict, num_samples: int, mode: str = "instruct",
             too_long += 1
             dropped_by[name] += 1
             continue
+        # Structural guarantee: a trace whose tool arguments are not grounded
+        # in earlier context teaches the model to invent values. Generator edge
+        # cases will always exist, so gate here rather than trusting every
+        # builder to be perfect.
+        if verify:
+            ok, _ = verify_trace(text)
+            if not ok:
+                ungrounded += 1
+                continue
         kept_by[name] += 1
         traces.append(text)
 
@@ -683,6 +723,7 @@ def generate(pool: dict, num_samples: int, mode: str = "instruct",
               "pattern is a capability the model cannot learn.")
 
     return traces, {"dropped_invalid": comp.dropped, "too_long": too_long,
+                    "ungrounded_rejected": ungrounded,
                     "facts": len(comp.facts),
                     "numeric_facts": len(comp.numeric_facts),
                     "kept_by_pattern": dict(kept_by),
