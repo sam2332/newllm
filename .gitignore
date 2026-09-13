@@ -10,6 +10,9 @@ checkpoints*/
 *.resume
 *.resume.tmp
 
+data/cache/
+logs/
+
 results/
 
 # data/ IS tracked: ollama_pool.json and sandbox_pool.json are small
