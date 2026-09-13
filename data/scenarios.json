@@ -94342,5 +94342,4819 @@
     ]
    }
   ]
+ },
+ {
+  "title": "Reconcile conflicting sales data",
+  "turns": [
+   {
+    "user": "I need to reconcile the sales figures from three different systems. Start by getting the latest figures from each.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The numbers don't match. What's the difference between the first and second source?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I think the third source is wrong. How much is the total if I exclude it?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to confirm the correct total and identify where the discrepancies are coming from.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a data pipeline",
+  "turns": [
+   {
+    "user": "Audit the data pipeline from source to output. Start by checking the input data.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to compare the input with what was processed. What was the first input value?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I think the processing step may have failed. Can you look at the last log entry?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to trace the last error back to its source.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace a financial discrepancy",
+  "turns": [
+   {
+    "user": "I found a discrepancy in the balance sheet. Trace the origin of the mismatched number.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "What's the difference between the original number and the one you found?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to check the input that generated it. What was the first transaction amount?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to trace back to the source of the input. Can you find the original entry?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Debug a code pipeline",
+  "turns": [
+   {
+    "user": "Debug this code pipeline. Start by inspecting the code for errors.",
+    "steps": [
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I think there was a failure in step 3. Can you show the error message?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "What was the output before the error occurred?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I need to rerun the pipeline with a fix. What's the current state of the variables?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile Data Across Sources",
+  "turns": [
+   {
+    "user": "Find the latest GDP figure for the US from a reliable source",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Compare that number with the figure from the national statistical office",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now check if the difference is due to a seasonal adjustment",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "It seems the numbers don't match. Can you trace where the error might be?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Okay, now let's confirm the final value using a third source",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a Data Pipeline",
+  "turns": [
+   {
+    "user": "Start by checking the source system's last data sync timestamp",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now find out how much data was transferred in that batch",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Check if any data was dropped or corrupted during transfer",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Recover from that error. Let's compare the original and received data",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now verify the final output against a known good dataset",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace a Number Back to Its Origin",
+  "turns": [
+   {
+    "user": "Find the source of the figure 12.345 in the report",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "It seems that number came from a calculation. What was it based on?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now check the original inputs to that calculation",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "One of the inputs appears invalid. Can you find where it came from?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Okay, now confirm the corrected value using the new input",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile Financial Statements",
+  "turns": [
+   {
+    "user": "Find the total revenue from the first quarter report",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Compare that with the revenue in the monthly breakdown",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now check the variance between the two",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "It looks like the variance is due to a failed transaction. Can you trace it?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Recompute the revenue with the corrected value",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile figures across sources",
+  "turns": [
+   {
+    "user": "Find the latest GDP figures from three different sources.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Compare the number you got from the first source with the second.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Check if the third source has an explanation for the discrepancy.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Summarize the findings for the user.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a data pipeline",
+  "turns": [
+   {
+    "user": "Trace the origin of the number 12345 in the final report.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Verify the first value using a different method.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Compare the intermediate values with the source data.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Present the audit results.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Track a number through processing steps",
+  "turns": [
+   {
+    "user": "Show me how the number 789 was derived from the raw data.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Confirm the calculation with a second method.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "time"
+     }
+    ]
+   },
+   {
+    "user": "Check for any missing steps between the intermediate values.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Reconstruct the full derivation chain for clarity.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile financial reports",
+  "turns": [
+   {
+    "user": "Compare the net income figures from the three quarterly reports.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Check the first report against the internal financial system.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "time"
+     }
+    ]
+   },
+   {
+    "user": "Verify the third report using the source data files.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Present a reconciliation summary with all steps.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile conflicting financial reports",
+  "turns": [
+   {
+    "user": "I need to reconcile these three financial reports. Let's start by getting the latest numbers from each source.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "The numbers don't match. I need to check which one is accurate. Let's compare the first two reports again.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "There's a discrepancy. I think there was an error in the second report. Let me check the third one again.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Okay, I've adjusted for that. Now I need to recompute the final total with the corrected value.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace the source of a calculation error",
+  "turns": [
+   {
+    "user": "I found an error in this calculation. Let's trace where the incorrect value came from.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "That number seems off. Let me check the input values again to find the root cause.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "One of the inputs was incorrect. I need to correct that and re-run the calculation.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Okay, now with the corrected input, let me re-calculate the final value.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a data pipeline end-to-end",
+  "turns": [
+   {
+    "user": "I need to audit this data pipeline. Let's start by checking the raw input data.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "This looks clean, but I should verify the transformation step. Let's check the processed data next.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Hmm, there's an inconsistency. Maybe there was a failing call in the transformation. Let me check the logs.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Okay, I've identified the error. Let me rerun the transformation with the correct input.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Compare and validate multiple data sources",
+  "turns": [
+   {
+    "user": "I need to compare these two data sources. Let's start by getting the latest values from both.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The numbers don't match. Let's check the first source again for any recent changes.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Still inconsistent. I think the second source might have an error. Let me look up the third source for verification.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I've corrected for that. Now I'll compare all three sources again.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile Sales Figures",
+  "turns": [
+   {
+    "user": "I need to reconcile the sales figures from three different sources. Let's start by looking up the official numbers.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The numbers from the first source don't match. What's the difference between the first and second results?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "It looks like there's an inconsistency. Let me check the third source again to see if it matches either of the first two.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now that I have all three, can you find the average and flag any that are significantly off?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit Data Pipeline",
+  "turns": [
+   {
+    "user": "I need to audit the data pipeline from ingestion to output. Start by checking the input timestamp.",
+    "steps": [
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now look at the source data. What was the number you got from the first step?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "I see some discrepancies. Can you compare it with the data from the previous day?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now, check if the data was processed correctly. What's the result of the final calculation?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace Number Back to Source",
+  "turns": [
+   {
+    "user": "I need to find where the number 127 comes from. Start by checking the latest input values.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "What's the result of the last calculation? Maybe it's a combination of two values.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "It's not matching. Can you look up the earlier version of the number and compare?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now, check if the number came from a failing operation. What was the last error?",
+    "steps": [
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Validate Code Logic",
+  "turns": [
+   {
+    "user": "I need to verify that the code correctly handles edge cases. Start by inspecting the current version.",
+    "steps": [
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now run a test case with the value you just found. What was the output of that test?",
+    "steps": [
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "There's an issue. Can you check the error handling and the code from the last step?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now fix the problem and revalidate the code logic. What's the final result?",
+    "steps": [
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile Financial Statements",
+  "turns": [
+   {
+    "user": "Can you look up the Q2 revenue from the company's official website?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     }
+    ]
+   },
+   {
+    "user": "What's the difference between the number you got and the one from the annual report?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Why is the number you calculated different? Can you check if the exchange rate was applied correctly?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "I think the error was in the exchange rate. Let's try again with a corrected value.",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Now show me the final reconciliation and the date it was done.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Debug a Data Pipeline",
+  "turns": [
+   {
+    "user": "I need you to trace the origin of this data point in the system.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "What was the first value it came from? Can you show the code that processed it?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "I don't think that's the correct function. Let me check the logs for this processing step.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "The logs show an error. Can you find out what the original input was?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "Now confirm the final output and the timestamp of the error.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a Codebase for Security Issues",
+  "turns": [
+   {
+    "user": "Can you find all functions that handle user input in this repository?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     }
+    ]
+   },
+   {
+    "user": "Which of these functions are used in the login workflow? Show me the code.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "I think there might be a vulnerability here. Can you run a linter on the code?",
+    "steps": [
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "The linter flagged an issue. What line number and code were reported?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Now provide the final audit summary and the line number to fix.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Compare Sales Figures Across Platforms",
+  "turns": [
+   {
+    "user": "I need you to check the total sales from the website and the app.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     }
+    ]
+   },
+   {
+    "user": "What's the difference between the number you got from the website and the app?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The number seems off. Let me check the API logs for the app sales.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "I think the error was in the date range. Can you recalculate with the correct period?",
+    "steps": [
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     }
+    ]
+   },
+   {
+    "user": "Now show me the final numbers and the corrected difference.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile Cross-Source Financial Data",
+  "turns": [
+   {
+    "user": "I need to compare the total revenue figures from three different reports. Can you start by looking up the latest financial reports from each source?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The number you got from the first report seems off. Can you recheck that source and see if there was a formatting error?",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit a Data Processing Pipeline",
+  "turns": [
+   {
+    "user": "Audit the data processing pipeline from input to output. Start by tracing the original data source and the first transformation step.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The value it gave for the first transformation doesn't match the input. Can you inspect the code of the transformation step to find the issue?",
+    "steps": [
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace the Origin of a Number",
+  "turns": [
+   {
+    "user": "I found a number in the output that I need to trace back. Can you start by looking up where that number came from?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The number you got from the second source seems to be a duplicate. Can you check if there was an error in the original calculation?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Compare Results from Multiple Algorithms",
+  "turns": [
+   {
+    "user": "I want to compare the output of two different machine learning models on the same dataset. Can you start by running each model and getting their outputs?",
+    "steps": [
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     }
+    ]
+   },
+   {
+    "user": "The results from the second model are inconsistent with the first. Can you look at the code of the second model to see if there was a mistake?",
+    "steps": [
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Reconcile conflicting sales data",
+  "turns": [
+   {
+    "user": "I need to reconcile the sales numbers from three different reports.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "The numbers from the first report are different from the others. What's the discrepancy?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "Let's check the timestamps of the reports. Did any of them get updated recently?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "Based on that, what's the final reconciled total?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Audit the data pipeline for a forecast model",
+  "turns": [
+   {
+    "user": "Audit the data pipeline to make sure all steps are correct and consistent.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "I need to check if the input data has been cleaned properly.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "What's the latest version of the cleaning script used?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Did any recent changes affect the output of this step?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Trace the origin of a key financial figure",
+  "turns": [
+   {
+    "user": "I need to trace the number 125,000 back to its source in the financial records.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "It seems like it came from a calculation. Can you show that step?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "Is that calculation consistent with the original input values?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Let me check the source documents again. Are all the inputs correct?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "title": "Compare pricing models across different platforms",
+  "turns": [
+   {
+    "user": "Compare the pricing models for our service across three platforms.",
+    "steps": [
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "lookup_fact"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "The base rates are different. Can you explain how each model calculates the final price?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "failing_call"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     }
+    ]
+   },
+   {
+    "user": "I need to see the full breakdown of each model's calculation.",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   },
+   {
+    "user": "Based on that, what\u2019s the overall difference in cost between the models?",
+    "steps": [
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     },
+     {
+      "kind": "time"
+     },
+     {
+      "kind": "run_code"
+     },
+     {
+      "kind": "inspect_code"
+     },
+     {
+      "kind": "lookup_memory"
+     },
+     {
+      "kind": "compute"
+     },
+     {
+      "kind": "combine"
+     }
+    ]
+   }
+  ]
  }
 ]
