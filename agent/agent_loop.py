@@ -15,6 +15,7 @@ from agent.tools import Toolbox
 from agent.tokenizer import AgentTokenizer, DEFAULT_AGENT_TOKENIZER
 from agent.generate import generate
 from agent.constrained import AssistantGrammar
+from agent.tool_schema import schema_block_from_toolbox
 from sampling import Sampler
 
 
@@ -32,7 +33,9 @@ def _build_context(question: str, history: list,
     """
     parts = []
     if system:
-        parts.append(f"<system>{system}</system>")
+        # Already-tagged blocks pass through; bare text gets wrapped.
+        parts.append(system if system.startswith("<system>")
+                     else f"<system>{system}</system>")
     if conversation:
         parts.extend(conversation)
     parts.append(f"<user>{question}</user>")
@@ -148,6 +151,12 @@ def run_agent(model, question: str, toolbox: Toolbox,
 
     grammar = (AssistantGrammar(list(toolbox.tools.keys()), tokenizer)
                if constrained else None)
+
+    # The model is trained to read the tool schema from context, so it must be
+    # given the schema of whatever toolbox it is actually serving. Without
+    # this it can only guess names, which is what made renaming catastrophic.
+    if system is None and getattr(toolbox, "tools", None):
+        system = schema_block_from_toolbox(toolbox)
 
     max_len = getattr(model, "max_len", 512)
     history = []

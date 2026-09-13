@@ -1,0 +1,201 @@
+"""Tool schemas in context, with randomized names, so the model reads them.
+
+The model previously saw only "<user>question</user>". Tool names lived in its
+weights, so renaming calc -> compute_expression took the battery from 88.2% to
+0.0%: it still emitted "calc", which no longer existed. A model like that can
+never serve a user who brings their own tools.
+
+The fix is the one real function-calling APIs use - pass the tools per request:
+
+    <system>{"tools":[{"name":...,"description":...,"parameters":{...}}]}</system>
+    <user>What is 12 + 8?</user>
+    <assistant>{"thought":"...","tool_call":{"name":"<a name from the schema>",...}}
+
+Training randomizes the surface form every time: names are drawn from
+synonymous, generic and deliberately opaque pools, descriptions are paraphrased,
+unused distractor tools are included, and the order is shuffled. Memorizing a
+name is therefore useless - the only way to answer is to read the schema and
+copy the matching name. Opaque names like "xq7_run" matter most: they make the
+description the sole signal, so the model cannot pattern-match on a plausible
+identifier either.
+"""
+
+import json
+import random
+
+# Several surface names per capability, spanning plausible to opaque.
+NAME_POOLS = {
+    "calc": ["calc", "compute_expression", "evaluate_math", "do_arithmetic",
+             "math_eval", "calculator", "arith", "solve_expr", "fn_compute",
+             "tool_math", "xq7_eval", "op_42", "zx_calc"],
+    "search_memory": ["search_memory", "lookup_stored_value", "recall",
+                      "get_memory", "read_store", "fetch_saved", "memo_get",
+                      "kv_lookup", "tool_recall", "mm_fetch", "q3_store"],
+    "web_search": ["web_search", "query_knowledge_base", "lookup_fact",
+                   "search_web", "find_online", "kb_query", "fact_find",
+                   "external_lookup", "tool_search", "wz_query", "v9_find"],
+    "now": ["now", "current_timestamp", "get_time", "clock", "today",
+            "read_clock", "time_now", "tool_clock", "tk_now", "d4_time"],
+    "run_bash": ["run_bash", "shell", "execute_shell", "bash_exec",
+                 "run_command", "sh", "terminal", "tool_shell", "rb9_exec"],
+    "run_python": ["run_python", "execute_python", "py_exec", "run_snippet",
+                   "python_eval", "script_run", "tool_python", "px2_run"],
+    "describe_symbol": ["describe_symbol", "lookup_symbol", "find_definition",
+                        "symbol_info", "get_def", "code_lookup", "sy5_info"],
+    "read_file": ["read_file", "open_file", "cat_file", "file_read",
+                  "get_source", "load_file", "rf3_read"],
+    "search_code": ["search_code", "grep_source", "find_in_code",
+                    "code_grep", "scan_source", "sc8_find"],
+    "list_files": ["list_files", "ls", "enumerate_files", "file_list",
+                   "dir_listing", "lf2_list"],
+    "repo_stats": ["repo_stats", "codebase_summary", "project_info",
+                   "repo_overview", "rs4_stats"],
+}
+
+# Paraphrases so the description is not a memorizable constant either.
+DESCRIPTIONS = {
+    "calc": ["Evaluate an arithmetic expression.",
+             "Compute the result of a mathematical expression.",
+             "Perform a calculation and return the number.",
+             "Solve arithmetic: addition, subtraction, multiplication, division."],
+    "search_memory": ["Look up a value stored in memory by its key.",
+                      "Retrieve a saved internal value.",
+                      "Read a previously stored key/value pair.",
+                      "Fetch a remembered value by name."],
+    "web_search": ["Search for a short factual answer.",
+                   "Look up a fact that is not known internally.",
+                   "Query an external knowledge source for a fact.",
+                   "Find factual information about a topic."],
+    "now": ["Return the current date and time.",
+            "Get the present timestamp.",
+            "Read the system clock.",
+            "Report what time it is now."],
+    "run_bash": ["Run a shell command in an isolated sandbox.",
+                 "Execute a shell command and return its output.",
+                 "Run a command line in a sandboxed environment."],
+    "run_python": ["Run a Python snippet in an isolated sandbox.",
+                   "Execute Python code and return its output.",
+                   "Evaluate a Python script in a sandbox."],
+    "describe_symbol": ["Look up a class or function definition by name.",
+                        "Return the definition and docstring of a symbol.",
+                        "Find where a symbol is defined."],
+    "read_file": ["Read lines from a source file.",
+                  "Return the contents of part of a file.",
+                  "Open a file and read a range of lines."],
+    "search_code": ["Search source code for a string.",
+                    "Find occurrences of text across the codebase.",
+                    "Grep the source for a literal match."],
+    "list_files": ["List source files, optionally filtered.",
+                   "Enumerate files in the project.",
+                   "Show files whose path matches a pattern."],
+    "repo_stats": ["Summarize the repository structure and size.",
+                   "Report file and line counts per directory.",
+                   "Give an overview of the codebase."],
+}
+
+PARAM_SCHEMAS = {
+    "calc": {"expr": "Arithmetic expression to evaluate."},
+    "search_memory": {"key": "The key to look up."},
+    "web_search": {"query": "A short search query."},
+    "now": {},
+    "run_bash": {"command": "Shell command to run."},
+    "run_python": {"code": "Python source to execute."},
+    "describe_symbol": {"name": "Class or function name."},
+    "read_file": {"path": "Repo-relative file path.",
+                  "start": "First line number.", "lines": "How many lines."},
+    "search_code": {"query": "Literal text to find."},
+    "list_files": {"pattern": "Substring filter."},
+    "repo_stats": {},
+}
+
+REQUIRED = {
+    "calc": ["expr"], "search_memory": ["key"], "web_search": ["query"],
+    "now": [], "run_bash": ["command"], "run_python": ["code"],
+    "describe_symbol": ["name"], "read_file": ["path"],
+    "search_code": ["query"], "list_files": ["pattern"], "repo_stats": [],
+}
+
+
+class ToolSchemaSampler:
+    """Produces a randomized schema and the canonical -> surface name map."""
+
+    def __init__(self, rng: random.Random, distractor_prob: float = 0.6,
+                 max_distractors: int = 4):
+        self.rng = rng
+        self.distractor_prob = distractor_prob
+        self.max_distractors = max_distractors
+
+    def sample(self, used_tools) -> tuple:
+        """Return (mapping, system_block) for this trace.
+
+        ``used_tools`` are the canonical tools the trace actually calls.
+        Distractors are included so the model must SELECT, not just copy the
+        only option available.
+        """
+        used = [t for t in used_tools if t in NAME_POOLS]
+        pool = [t for t in NAME_POOLS if t not in set(used)]
+        extras = []
+        if pool and self.rng.random() < self.distractor_prob:
+            k = self.rng.randint(1, min(self.max_distractors, len(pool)))
+            extras = self.rng.sample(pool, k)
+
+        mapping, entries = {}, []
+        for canonical in used + extras:
+            surface = self.rng.choice(NAME_POOLS[canonical])
+            mapping[canonical] = surface
+            props = {
+                arg: {"type": "integer" if arg in ("start", "lines") else "string",
+                      "description": desc}
+                for arg, desc in PARAM_SCHEMAS[canonical].items()
+            }
+            entries.append({
+                "name": surface,
+                "description": self.rng.choice(DESCRIPTIONS[canonical]),
+                "parameters": {"type": "object", "properties": props,
+                               "required": REQUIRED[canonical]},
+            })
+        # Shuffle so position carries no information either.
+        self.rng.shuffle(entries)
+        block = "<system>" + json.dumps({"tools": entries},
+                                        separators=(",", ":")) + "</system>"
+        return mapping, block
+
+
+def schema_block_from_toolbox(toolbox) -> str:
+    """Build the system block for a live Toolbox, using its real names."""
+    entries = []
+    for name, spec in toolbox.tools.items():
+        if name == "finish":
+            continue
+        entries.append({"name": name,
+                        "description": spec["description"],
+                        "parameters": spec["parameters"]})
+    return "<system>" + json.dumps({"tools": entries},
+                                   separators=(",", ":")) + "</system>"
+
+
+def randomize_trace(text: str, rng: random.Random,
+                    sampler: "ToolSchemaSampler" = None) -> str:
+    """Rewrite a trace to use randomized tool names, prefixed by its schema.
+
+    Applied as a post-processing pass so every generator benefits without each
+    one needing to know about schemas. Both the assistant's ``"name":"calc"``
+    and the observation tag ``<tool name=calc>`` are rewritten, so the
+    canonical name survives nowhere in the text and cannot be memorized.
+    """
+    sampler = sampler or ToolSchemaSampler(rng)
+    used = []
+    for canonical in NAME_POOLS:
+        if f'"name":"{canonical}"' in text or f"<tool name={canonical}>" in text:
+            used.append(canonical)
+    if not used:
+        return text
+    mapping, block = sampler.sample(used)
+
+    # Longest first: "search_code" must not be rewritten by the "search_memory"
+    # rule, and no canonical name may be partially matched by another.
+    for canonical in sorted(mapping, key=len, reverse=True):
+        surface = mapping[canonical]
+        text = text.replace(f'"name":"{canonical}"', f'"name":"{surface}"')
+        text = text.replace(f"<tool name={canonical}>", f"<tool name={surface}>")
+    return block + "\n" + text

@@ -33,7 +33,7 @@ def cache_key(**params) -> str:
 def _worker(args):
     """Generate and tokenize one shard. Runs in a separate process."""
     (shard_idx, n, mode, pool_path, scenarios_path, scenario_fraction,
-     deep_fraction, deep_min, deep_max, max_len, seed) = args
+     deep_fraction, deep_min, deep_max, max_len, seed, randomize_tools) = args
     # Imports happen per-process; each shard gets its own seed so the shards
     # are different data rather than the same data repeated.
     from agent.rich_dataset import load_pool, generate
@@ -65,6 +65,15 @@ def _worker(args):
                           deep_min=deep_min, deep_max=deep_max)
         traces.extend(got)
 
+    # Randomize tool names and prepend the schema, so the model must read the
+    # schema rather than memorize names. Applied here so every generator gets
+    # it without each one needing to know about schemas.
+    if randomize_tools:
+        from agent.tool_schema import randomize_trace, ToolSchemaSampler
+        rng = random.Random(shard_seed + 77)
+        sampler = ToolSchemaSampler(rng)
+        traces = [randomize_trace(t, rng, sampler) for t in traces]
+
     # Tokenize in the same process: the traces never cross a pipe as strings,
     # only the far smaller token/mask arrays do.
     out = []
@@ -79,13 +88,13 @@ def _worker(args):
 def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
           scenarios_path=None, scenario_fraction=0.0, deep_fraction=0.0,
           deep_min=4, deep_max=12, max_len=16384, seed=42, workers=None,
-          cache=True, verbose=True):
+          cache=True, verbose=True, randomize_tools=True):
     """Return a list of (tokens, mask) pairs, built in parallel and cached."""
     workers = workers or min(64, max(1, (os.cpu_count() or 8) - 4))
     key = cache_key(samples=samples, mode=mode, pool=pool_path,
                     scenarios=scenarios_path, sf=scenario_fraction,
                     df=deep_fraction, dmin=deep_min, dmax=deep_max,
-                    max_len=max_len, seed=seed)
+                    max_len=max_len, seed=seed, rt=randomize_tools)
     path = os.path.join(CACHE_DIR, f"{mode}_{key}.pt")
 
     if cache and os.path.exists(path):
@@ -96,7 +105,8 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
     shards = workers * 2                      # 2 per worker balances stragglers
     per = max(1, samples // shards)
     jobs = [(i, per, mode, pool_path, scenarios_path, scenario_fraction,
-             deep_fraction, deep_min, deep_max, max_len, seed)
+             deep_fraction, deep_min, deep_max, max_len, seed,
+             randomize_tools)
             for i in range(shards)]
 
     if verbose:
