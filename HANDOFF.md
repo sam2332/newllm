@@ -113,6 +113,35 @@ append-only: ids 0-270 keep their meaning.
 Evaluate chat with `scripts/eval_chat.py`, which scores coreference, ellipsis,
 back-reference, topic switch and no-tool-needed separately.
 
+## Tool schemas are in the context (important)
+
+The model used to see only `<user>question</user>`. Tool names lived in its
+weights, never in its context. Measured: renaming `calc` to
+`compute_expression` took the battery from **88.2% to 0.0%**. It still made 16
+of 17 tool calls; it just called `calc`, which no longer existed.
+
+The context now carries the schema the way real function-calling APIs do:
+
+```text
+<system>{"tools":[{"name":...,"description":...,"parameters":{...}}]}</system>
+<user>What is 12 + 8?</user>
+<assistant>{"thought":"...","tool_call":{"name":"<a name from the schema>",...}}
+```
+
+Training randomizes the surface form on every trace (`agent/tool_schema.py`):
+names drawn from synonymous, generic and deliberately opaque pools, paraphrased
+descriptions, unused distractor tools so the model must select rather than copy
+the only option, and shuffled order. The opaque names matter most - they leave
+the description as the only signal.
+
+`scripts/eval_renamed.py` scores the battery twice, once with the original names
+and once renamed. **Treat a large gap as a blocking defect**: it means the model
+has gone back to memorizing names and cannot serve a user's own tools.
+
+Checkpoints trained before this change (including `checkpoints_v2_M`, the 88.2%
+baseline) do NOT read schemas and score 0% under renaming. Keep the baseline for
+comparison, but it is not shippable as a general tool-calling model.
+
 ## Tools
 
 The model routes across 11 tools.

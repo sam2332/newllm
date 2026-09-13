@@ -361,3 +361,25 @@ hybrid, multi-token, reasoning): all pass.
 `checkpoints/agent_best.pt`, the legacy 256-vocabulary checkpoint HANDOFF.md
 already documents as unusable. It needs re-baselining against a current
 checkpoint.
+
+## Tool schemas in context
+
+The model saw only `<user>question</user>` - no tool list, no descriptions. Tool
+names were memorized into the weights. Renaming `calc` to `compute_expression`
+dropped the battery from 88.2% to 0.0% while the model still made 16 of 17 tool
+calls: it emitted the memorized name for a tool that no longer existed.
+
+That rules out the stated goal of shipping a model anyone can point at their own
+tools, so the protocol now passes schemas per request like Ollama and OpenAI do,
+and training randomizes names, descriptions, distractors and ordering so reading
+the schema is the only strategy that works.
+
+`scripts/eval_renamed.py` measures the gap. All checkpoints predating this change
+score 0% under renaming.
+
+## Cleanup
+
+Removed superseded checkpoint directories (legacy 256-vocab, the pre-JSON web
+agent, five failed JSON curricula, the 52.9% instruct/chat runs, and a
+deep-chain run killed mid-build). Kept `checkpoints_v2_M` as the verified 88.2%
+baseline. Freed ~8.5GB including stale dataset caches, which rebuild in ~95s.
