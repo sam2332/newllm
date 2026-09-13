@@ -12,21 +12,34 @@ import json
 import torch
 
 from agent.tools import Toolbox
+from agent.tokenizer import AgentTokenizer, DEFAULT_AGENT_TOKENIZER
+from agent.generate import generate
+from agent.constrained import AssistantGrammar
 from sampling import Sampler
 
 
 EOT = "\x03"
 
 
-def _tokenize(text: str, max_vocab: int = 256) -> list:
-    return [min(ord(c), max_vocab - 1) for c in text]
+def _build_context(question: str, history: list,
+                   conversation: list = None, system: str = None) -> str:
+    """Build the exact tagged message form used in the training dataset.
 
-
-def _build_context(question: str, history: list) -> str:
-    """Build the exact tagged message form used in the training dataset."""
-    parts = [f"<user>{question}</user>"]
+    ``conversation`` carries completed prior turns for multi-turn chat. Each
+    entry is a raw tagged block (``<user>..</user>``, ``<assistant>..</assistant>``
+    optionally followed by EOT, or ``<tool ..>..</tool>``) exactly as the
+    training serializer would have written it.
+    """
+    parts = []
+    if system:
+        parts.append(f"<system>{system}</system>")
+    if conversation:
+        parts.extend(conversation)
+    parts.append(f"<user>{question}</user>")
     parts.extend(history)
-    return "\n".join(parts)
+    # Training serializes every message boundary with a newline, including
+    # the boundary before the next assistant turn.
+    return "\n".join(parts) + "\n"
 
 
 def _extract_assistant_json(text: str, after_pos: int = 0) -> tuple:
@@ -77,23 +90,22 @@ def _validate_assistant_message(parsed: object) -> dict:
     return parsed
 
 
-def _find_unexecuted_action(text: str, executed_ends: set) -> tuple:
-    """Return (end_pos, parsed_json, start_pos) for the first unexecuted assistant action."""
-    pos = 0
+def _find_unexecuted_action(text: str, after_pos: int = 0) -> tuple:
+    """Return the first valid tool call generated at or after ``after_pos``."""
+    pos = after_pos
     while True:
         start, end, parsed = _extract_assistant_json(text, after_pos=pos)
         if start is None:
             return None, None, None
-        if end not in executed_ends:
-            if isinstance(parsed.get("tool_call"), dict):
-                return end, parsed, start
+        if isinstance(parsed.get("tool_call"), dict):
+            return end, parsed, start
         pos = end
 
 
-def _find_final_response(text: str) -> tuple:
-    """Return (response_text, parsed_json) of the last assistant message."""
+def _find_final_response(text: str, after_pos: int = 0) -> tuple:
+    """Return the last final response generated at or after ``after_pos``."""
     last = None
-    pos = 0
+    pos = after_pos
     while True:
         start, end, parsed = _extract_assistant_json(text, after_pos=pos)
         if start is None:
@@ -108,10 +120,21 @@ def _find_final_response(text: str) -> tuple:
     return "", last
 
 
+def _select_final_answer(response: str, steps: list) -> str:
+    """Prefer real tool output over a model-generated copy of that output."""
+    if steps:
+        return str(steps[-1]["result"])
+    return response
+
+
 def run_agent(model, question: str, toolbox: Toolbox,
               max_steps: int = 5, max_new: int = 120,
               sampler: Sampler = None, device: str = "cuda",
-              greedy: bool = False) -> dict:
+              greedy: bool = False,
+              tokenizer: AgentTokenizer = DEFAULT_AGENT_TOKENIZER,
+              constrained: bool = False,
+              conversation: list = None,
+              system: str = None) -> dict:
     """Run an interactive JSON tool-use loop with the model.
 
     Returns dict with final_answer, thinking, trace, steps, and success.
@@ -123,96 +146,96 @@ def run_agent(model, question: str, toolbox: Toolbox,
         sampler = Sampler(temperature=0.5, top_k=20, top_p=0.9,
                           repetition_penalty=1.0)
 
+    grammar = (AssistantGrammar(list(toolbox.tools.keys()), tokenizer)
+               if constrained else None)
+
     max_len = getattr(model, "max_len", 512)
     history = []
     trace_parts = [f"<user>{question}</user>"]
+    turn_blocks = []
     steps = []
-    executed_ends = set()
 
     for step in range(max_steps):
-        context = _build_context(question, history)
-        context_tokens = _tokenize(context)
+        context = _build_context(question, history,
+                                 conversation=conversation, system=system)
+        context_tokens = tokenizer.encode(context)
         if len(context_tokens) > max_len:
             context_tokens = context_tokens[-max_len:]
-        input_ids = torch.tensor([context_tokens], dtype=torch.long,
-                                 device=device)
-        generated = list(context_tokens)
-        prefix_len = len(context_tokens)
-        model.eval()
-        generated_text = ""
-        with torch.no_grad():
-            for _ in range(max_new):
-                out = model(input_ids)
-                logits = out[0] if isinstance(out, tuple) else out
-                if logits.dim() == 4:
-                    logits = logits[:, :, 0, :]
-                next_logits = logits[:, -1, :]
-                gen_tensor = torch.tensor(generated, dtype=torch.long,
-                                          device=device)
-                next_token = sampler.sample(next_logits, gen_tensor)
-                generated.append(next_token)
-                input_ids = torch.cat([
-                    input_ids,
-                    torch.tensor([[next_token]], device=device)
-                ], dim=1)
-                if input_ids.size(1) > max_len:
-                    input_ids = input_ids[:, -max_len:]
 
-                text = "".join(chr(min(t, 255)) for t in generated)
-                generated_text = text
+        # One incremental pass with a KV cache, stopping at </assistant>.
+        delta = generate(model, context_tokens, sampler, max_new=max_new,
+                         device=device, tokenizer=tokenizer, grammar=grammar)
 
-                if EOT in text:
-                    break
+        full_text = context + delta
+        context_char_len = len(context)
 
-                end_pos, parsed, start_pos = _find_unexecuted_action(text, executed_ends)
-                if parsed is not None:
-                    tool_call = parsed.get("tool_call", {})
-                    tool_name = tool_call.get("name", "")
-                    tool_args = tool_call.get("arguments", {})
-                    result = toolbox.run_json({
-                        "tool": tool_name,
-                        "args": tool_args,
-                    })
-                    executed_ends.add(end_pos)
-                    steps.append({
-                        "tool": tool_name,
-                        "arg": json.dumps(tool_args, separators=(",", ":")),
-                        "result": result,
-                        "thought": parsed.get("thought", ""),
-                    })
-                    assistant_block = text[start_pos:end_pos]
-                    tool_block = f"<tool name={tool_name}>{result}</tool>"
-                    history.append(assistant_block)
-                    history.append(tool_block)
-                    trace_parts.append(assistant_block)
-                    trace_parts.append(tool_block)
-                    break
+        end_pos, parsed, start_pos = _find_unexecuted_action(
+            full_text, after_pos=context_char_len)
+        if parsed is not None:
+            tool_call = parsed.get("tool_call", {})
+            tool_name = tool_call.get("name", "")
+            tool_args = tool_call.get("arguments", {})
+            result = toolbox.run_json({"tool": tool_name, "args": tool_args})
+            steps.append({
+                "tool": tool_name,
+                "arg": json.dumps(tool_args, separators=(",", ":")),
+                "result": result,
+                "thought": parsed.get("thought", ""),
+            })
+            assistant_block = full_text[start_pos:end_pos]
+            tool_block = f"<tool name={tool_name}>{result}</tool>"
+            history.append(assistant_block)
+            history.append(tool_block)
+            trace_parts.append(assistant_block)
+            trace_parts.append(tool_block)
+            turn_blocks.extend([assistant_block, tool_block])
+            continue
 
-            else:
-                trace_parts.append(generated_text[prefix_len:])
-
-        full_text = _build_context(question, history) + generated_text[prefix_len:]
-        response, last = _find_final_response(full_text)
+        response, last = _find_final_response(full_text,
+                                              after_pos=context_char_len)
+        trace_parts.append(delta)
         if response:
-            trace_parts.append(generated_text[prefix_len:])
+            start, end, _ = _extract_assistant_json(full_text,
+                                                    after_pos=context_char_len)
+            if start is not None:
+                turn_blocks.append(full_text[start:end] + EOT)
             return {
                 "thinking": last.get("thought", "") if last else "",
-                "final_answer": response,
+                "final_answer": _select_final_answer(response, steps),
+                "model_response": response,
                 "trace": "\n".join(trace_parts),
                 "steps": steps,
                 "success": True,
+                "turn_blocks": [f"<user>{question}</user>"] + turn_blocks,
             }
+        break
 
-        end_pos, parsed, _ = _find_unexecuted_action(full_text, executed_ends)
-        if parsed is None:
-            trace_parts.append(generated_text[prefix_len:])
-            break
-
-    response, last = _find_final_response(_build_context(question, history))
+    response, last = _find_final_response(
+        _build_context(question, history, conversation=conversation,
+                       system=system))
     return {
         "thinking": last.get("thought", "") if last else "",
-        "final_answer": response,
+        "final_answer": _select_final_answer(response, steps),
+        "model_response": response,
         "trace": "\n".join(trace_parts),
         "steps": steps,
         "success": bool(response),
+        "turn_blocks": [f"<user>{question}</user>"] + turn_blocks,
     }
+
+
+def run_chat(model, turns, toolbox: Toolbox, system: str = None, **kwargs):
+    """Run a multi-turn conversation, carrying context between turns.
+
+    ``turns`` is a list of user messages. Each turn sees every prior user
+    message, assistant answer and tool observation, which is what makes
+    coreference ("multiply that by 3") resolvable.
+    """
+    conversation = []
+    results = []
+    for turn in turns:
+        result = run_agent(model, turn, toolbox, conversation=list(conversation),
+                           system=system, **kwargs)
+        conversation.extend(result.get("turn_blocks", []))
+        results.append(result)
+    return results
