@@ -13,13 +13,15 @@ from model.feed_forward import FeedForward
 
 class MoELayer(nn.Module):
     def __init__(self, d_model: int, d_ff: int, num_experts: int = 4,
-                 top_k: int = 2, dropout: float = 0.1):
+                 top_k: int = 2, dropout: float = 0.1,
+                 arch_version: int = 2):
         super().__init__()
         self.num_experts = num_experts
         self.top_k = top_k
         # grug: many small expert blobs
         self.experts = nn.ModuleList([
-            FeedForward(d_model, d_ff, dropout) for _ in range(num_experts)
+            FeedForward(d_model, d_ff, dropout, arch_version=arch_version)
+            for _ in range(num_experts)
         ])
         # grug: router decides which expert wake up
         self.router = nn.Linear(d_model, num_experts)
