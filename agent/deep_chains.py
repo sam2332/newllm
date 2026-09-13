@@ -281,27 +281,40 @@ def verify_trace(text: str, dataflow_tools=DATAFLOW_TOOLS) -> tuple:
     """
     problems = []
     grounded = []
-    first_user = re.search(r"<user>(.*?)</user>", text, re.S)
-    if first_user:
-        grounded.extend(floats_in_order(first_user.group(1)))
 
-    pattern = re.compile(
-        r'"tool_call":\{"name":"(\w+)","arguments":(\{.*?\})\}\}</assistant>'
-        r'(?:\n<tool name=\w+>(.*?)</tool>)?', re.S)
-    for i, m in enumerate(pattern.finditer(text), 1):
-        name, raw_args, observation = m.group(1), m.group(2), m.group(3)
-        try:
-            args = json.loads(raw_args)
-        except json.JSONDecodeError:
-            problems.append(f"hop {i}: unparseable arguments")
-            continue
-        if name in dataflow_tools:
+    # Walk the transcript in document order. An earlier version seeded
+    # grounding from only the FIRST <user> block, so in a multi-turn
+    # conversation a constant stated in turn 2 ("now multiply that by 7") was
+    # invisible and every later computation was flagged. That rejected 97% of
+    # legitimate multi-turn traces, and at inference it would have fired on
+    # correct behaviour - the failure mode that gets a safety check switched off.
+    event = re.compile(
+        r"<user>(?P<user>.*?)</user>"
+        r"|<tool name=\w+>(?P<obs>.*?)</tool>"
+        r"|\"tool_call\":\{\"name\":\"(?P<tool>\w+)\","
+        r"\"arguments\":(?P<args>\{.*?\})\}\}</assistant>",
+        re.S)
+
+    hop = 0
+    for m in event.finditer(text):
+        if m.group("user") is not None:
+            grounded.extend(floats_in_order(m.group("user")))
+        elif m.group("obs") is not None:
+            grounded.extend(floats_in_order(m.group("obs")))
+        else:
+            hop += 1
+            name = m.group("tool")
+            if name not in dataflow_tools:
+                continue
+            try:
+                args = json.loads(m.group("args"))
+            except json.JSONDecodeError:
+                problems.append(f"hop {hop}: unparseable arguments")
+                continue
             for value in args.values():
                 for n in floats_in_order(value):
                     if not _is_grounded(n, grounded):
                         problems.append(
-                            f"hop {i} ({name}): value {_canon(n)} not grounded "
-                            f"in prior context")
-        if observation is not None:
-            grounded.extend(floats_in_order(observation))
+                            f"hop {hop} ({name}): value {_canon(n)} not "
+                            f"grounded in prior context")
     return (not problems), problems
