@@ -7,6 +7,7 @@ function-call style requests:
 """
 
 import datetime
+import difflib
 import re
 import json
 
@@ -48,20 +49,25 @@ WEB_KB = {
 }
 
 
-def _web_search(query: str) -> str:
+def _web_search(query: str, kb: dict = None) -> str:
     """Simulate a web search by looking up a canned answer.
 
     The model must emit a web_search tool call to retrieve facts that are not
-    in its parametric memory.
+    in its parametric memory. ``kb`` allows a larger generated fact set to be
+    injected for training without editing this module.
     """
+    kb = WEB_KB if kb is None else kb
     query = query.strip().lower().rstrip("?")
     # Try exact match first.
-    if query in WEB_KB:
-        return WEB_KB[query]
+    if query in kb:
+        return kb[query]
     # Substring match.
-    for key, value in WEB_KB.items():
+    for key, value in kb.items():
         if key in query or query in key:
             return value
+    match = difflib.get_close_matches(query, kb.keys(), n=1, cutoff=0.78)
+    if match:
+        return kb[match[0]]
     return "no results found"
 
 
@@ -72,16 +78,19 @@ class Toolbox:
     The model emits JSON tool calls; `run_json` validates and executes them.
     """
 
-    def __init__(self):
-        self.memory = {
-            "project": "newllm",
-            "device": "cuda",
-            "leader": "grug",
-            "tribe": "cavepeople",
-            "language": "Python",
-            "status": "active",
-            "version": "0.1",
-        }
+    DEFAULT_MEMORY = {
+        "project": "newllm",
+        "device": "cuda",
+        "leader": "grug",
+        "tribe": "cavepeople",
+        "language": "Python",
+        "status": "active",
+        "version": "0.1",
+    }
+
+    def __init__(self, memory: dict = None, web_kb: dict = None):
+        self.memory = dict(memory) if memory else dict(self.DEFAULT_MEMORY)
+        self.web_kb = dict(web_kb) if web_kb else dict(WEB_KB)
         self.tools = {
             "calc": {
                 "description": "Evaluate a simple arithmetic expression.",
@@ -133,7 +142,8 @@ class Toolbox:
                     },
                     "required": ["query"],
                 },
-                "execute": lambda args: _web_search(args.get("query", "")),
+                "execute": lambda args: _web_search(args.get("query", ""),
+                                                    self.web_kb),
             },
             "finish": {
                 "description": "Signal that the task is complete.",
@@ -173,14 +183,31 @@ class Toolbox:
             else {}
         )
 
+    def _normalize_tool_name(self, name: str) -> str:
+        name = name.strip()
+        if name in self.tools:
+            return name
+        match = difflib.get_close_matches(name, self.tools.keys(), n=1, cutoff=0.82)
+        return match[0] if match else name
+
+    def _normalize_memory_key(self, key: str) -> str:
+        key = key.strip()
+        if key in self.memory:
+            return key
+        match = difflib.get_close_matches(key, self.memory.keys(), n=1, cutoff=0.78)
+        return match[0] if match else key
+
     def run_json(self, call: dict) -> str:
         """Execute a JSON tool call of the form {'tool': str, 'args': dict}."""
-        name = call.get("tool", call.get("name", "")).strip()
+        name = self._normalize_tool_name(call.get("tool", call.get("name", "")))
         if name not in self.tools:
             return f"ERROR: unknown tool '{name}'"
         args = call.get("args", call.get("arguments", {}))
         if not isinstance(args, dict):
             return "ERROR: tool args must be a JSON object"
+        if name == "search_memory" and isinstance(args.get("key"), str):
+            args = dict(args)
+            args["key"] = self._normalize_memory_key(args["key"])
         spec = self.tools[name]
         required = spec["parameters"].get("required", [])
         missing = [p for p in required if p not in args]
