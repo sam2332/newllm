@@ -25,6 +25,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import random_split
 
 from agent.dataset import AgentDataset
+from agent.dataset_builder import build as build_dataset, PrebuiltDataset
 from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
 from model.transformer import Transformer
 from training.trainer import Trainer
@@ -109,6 +110,8 @@ def main():
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--build-workers", type=int, default=48,
+                    help="processes used to build the dataset")
     ap.add_argument("--scenarios", default="data/scenarios.json",
                     help="teacher-written scenario plans")
     ap.add_argument("--scenario-fraction", type=float, default=0.0,
@@ -156,19 +159,34 @@ def main():
         if ddp:
             print(f"    DDP across {world_size} GPUs "
                   f"(effective batch x{world_size})")
-    traces = build_traces(args.mode, args.pool, args.samples, max_len, args.seed,
-                          deep_fraction=args.deep_fraction,
-                          deep_min=args.deep_min, deep_max=args.deep_max,
-                          quiet=not is_main,
-                          scenarios_path=args.scenarios,
-                          scenario_fraction=args.scenario_fraction)
-    ds = AgentDataset(traces, max_len=max_len, tokenizer=TOK)
+    # Build once, in parallel, and cache. The single-threaded path spent ~44
+    # minutes here and DDP made each rank repeat it; rank 0 now builds while
+    # the others wait on the barrier, then everyone loads the same cache.
+    build_kwargs = dict(
+        samples=args.samples, mode=args.mode, pool_path=args.pool,
+        scenarios_path=args.scenarios if args.scenario_fraction else None,
+        scenario_fraction=args.scenario_fraction,
+        deep_fraction=args.deep_fraction, deep_min=args.deep_min,
+        deep_max=args.deep_max, max_len=max_len, seed=args.seed,
+        workers=args.build_workers)
+    if ddp:
+        if is_main:
+            samples_data = build_dataset(verbose=True, **build_kwargs)
+            dist.barrier()
+        else:
+            dist.barrier()
+            samples_data = build_dataset(verbose=False, **build_kwargs)
+    else:
+        samples_data = build_dataset(verbose=True, **build_kwargs)
+
+    ds = PrebuiltDataset(samples_data)
     val_n = max(1, int(len(ds) * 0.05))
     train_set, val_set = random_split(
         ds, [len(ds) - val_n, val_n],
         generator=torch.Generator().manual_seed(args.seed))
     if is_main:
-        print(f"dataset: {len(train_set)} train / {len(val_set)} val, "
+        hops = None
+        print(f"dataset: {len(train_set):,} train / {len(val_set):,} val, "
               f"max_len={max_len}")
 
     cfg = PRESETS[args.size]

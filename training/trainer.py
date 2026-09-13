@@ -334,9 +334,12 @@ class Trainer:
                     if vl < self.best_val_loss:
                         self.best_val_loss = vl
                         self.best_val_step = step
+                        # Capture from the UNWRAPPED model: under DDP
+                        # self.model.state_dict() carries a "module." prefix
+                        # that will not load back into the bare Transformer.
                         self._best_model_state = {
                             k: v.detach().cpu().clone()
-                            for k, v in self.model.state_dict().items()
+                            for k, v in self._unwrapped().state_dict().items()
                         }
                     postfix["val"] = f"{vl:.4f}"
             pbar.set_postfix(postfix)
@@ -364,7 +367,7 @@ class Trainer:
         if self._best_model_state is None:
             self._best_model_state = {
                 k: v.detach().cpu().clone()
-                for k, v in self.model.state_dict().items()
+                for k, v in self._unwrapped().state_dict().items()
             }
         torch.save({
             "model": self._best_model_state,
