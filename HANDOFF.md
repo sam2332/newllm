@@ -400,3 +400,76 @@ signal did not appear until **step 7,000**, long past where patience-4 had
 already given up. Use `--eval-every 1000 --eval-patience 10`; it also halves the
 eval overhead, which is ~2 minutes per call and otherwise exceeds the training
 time.
+
+## Running one: scripts/run/
+
+The operational knowledge in this file is executable now. See
+`scripts/run/README.md`.
+
+```bash
+scripts/run/00_preflight.sh      # linger, power caps, venv, disk, caches, ollama
+scripts/run/02_build_dataset.sh  # ~20 min, ~6 GB
+scripts/run/03_train.sh          # ~89 min at 40k iters, one GPU, detached
+scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt
+```
+
+`01_gen_pool.sh` widens the pool with the Ollama teacher and merges rather than
+overwriting; it invalidates every dataset cache, so rebuild after it.
+`03_train_segmented.sh` runs in timed segments. Everything is overridable by
+environment variable.
+
+`scripts/build_dataset.py` builds a cache without training and writes a `.json`
+sidecar recording the parameters, so no future cache repeats the situation where
+`instruct_1d39780d71d5d7f5.pt` could only be reused by path.
+
+## Longer training was the lever, not more data
+
+12,000 iterations was 0.77 epochs: 449M of 584M tokens, ~6 tokens per parameter
+where a 74.8M model wants nearer 20. Validation loss was still falling
+monotonically when the run ended, and train 0.0747 sat level with val 0.0709 -
+no generalization gap at all.
+
+40,000 iterations (89 min, one GPU):
+
+| | 12k | 40k |
+|---|---|---|
+| best val | 0.0709 | **0.0434** |
+| held-out | 22/100 | **35/100** |
+| 1 call | 7/20 | 15/20 |
+| 2 calls | 9/12 | 10/12 |
+| 3 calls | 5/19 | 6/19 |
+| 4+ calls | 1/49 | 4/49 |
+
+Every bucket improved. The largest gain is single-call (7/20 -> 15/20), which is
+what `diag_deep_chains.py` predicted: the failure was grounding on the *first*
+call, not compounding with depth.
+
+Validation loss is now flattening (0.0460 @ 28k, 0.0434 @ 38.5k, 0.0435 @ 39.5k),
+so further steps have reached diminishing returns and **data is the next lever**.
+
+Constrained decoding was tested against this and is not the answer: 24/100 vs
+22/100, with the 4+ bucket unchanged at 1/49. Masking an invalid tool name just
+makes the model pick a valid wrong one.
+
+## Pool expansion
+
+`data/ollama_pool_merged.json` is ready but **not yet promoted**, because
+swapping it invalidates the dataset cache. Generated in 9.2 min with zero errors:
+
+| axis | before | generated | merged |
+|---|---|---|---|
+| thoughts | 1,212 | 2,120 | **3,319** |
+| paraphrases | 175 | 376 | **518** |
+| facts | 682 | 1,260 | **1,678** |
+
+Thoughts were the axis worth widening: 1,140 distinct across 323,715 uses in the
+dataset (284x reuse), against 22,718 distinct user questions per 30,000 traces
+(1.3x) and 144,342 distinct tool arguments. Questions and arguments were never
+the thin part.
+
+To adopt it:
+
+```bash
+cp data/ollama_pool_merged.json data/ollama_pool.json
+scripts/run/02_build_dataset.sh && scripts/run/03_train.sh
+```

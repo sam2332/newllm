@@ -17,3 +17,12 @@ results/
 
 # data/ IS tracked: ollama_pool.json and sandbox_pool.json are small
 # (~110KB) and expensive to regenerate, so they are worth versioning.
+
+# An empty clone of this same repo, nested in the working tree. origin is
+# already configured here, so it is redundant - kept only so nothing of the
+# user's is deleted without asking.
+newllm/
+
+# Timestamped copies made before a destructive pool regeneration; the live pool
+# is tracked, so these are duplicates.
+data/*.backup*.json
