@@ -50,18 +50,28 @@ PLAN_PROMPT = """You are designing training scenarios for a tool-using AI agent.
 The agent has these step kinds, and ONLY these:
 {kinds}
 
-Design {n} DIFFERENT realistic multi-turn scenarios. Each scenario is a
-conversation of 2 to 4 user turns. Each user turn is resolved by {lo} to {hi}
-steps. Across the whole conversation, later turns must depend on earlier
-results (pronouns like "that", "it", references to an earlier answer).
+Design {n} DIFFERENT realistic scenarios. These model LONG tasks: real work
+that takes many tool calls, not quick questions.
+
+HARD REQUIREMENTS - a scenario that misses these is discarded:
+- EXACTLY {turns} user turns per scenario. Not fewer.
+- {total} steps TOTAL across the scenario, spread over those turns.
+- Turn 1 should be the largest; later turns refine, extend or correct.
+- Every turn after the first must refer back to an earlier result, using
+  "that", "it", "the number you got", or naming the earlier quantity.
 
 Rules:
 - "user" is what a real person would type. Natural, varied, sometimes terse.
 - Do NOT invent specific numbers, facts, or answers. Describe intent only.
-- Use "failing_call" in roughly a third of scenarios, always followed by at
+- Use "failing_call" in about a third of scenarios, always followed by at
   least one more step that recovers.
-- Vary domain: research, data wrangling, code inspection, calculation, mixed.
+- Vary domain: research, data wrangling, code inspection, calculation, audit,
+  reconciliation, multi-source comparison.
 - Vary tone: terse, polite, frustrated, curious.
+
+Think of tasks like "reconcile these figures across three sources", "audit
+this pipeline end to end", "trace this number back to where it came from" -
+work that genuinely needs {total} steps.
 
 Return ONLY a JSON array of {n} objects shaped exactly like:
 [
@@ -158,8 +168,16 @@ def validate_plan(plan):
 
 
 def job(index, model, endpoint, per_call, lo, hi):
+    # Ask for an explicit target rather than a range. Given "4 to 18 steps"
+    # the teacher consistently produced 8, and given "2 to 4 turns" it produced
+    # 2 every time - it anchors on the low end of any range it is offered.
+    import random as _r
+    rnd = _r.Random(index)
+    total = rnd.choice([12, 16, 20, 24, 30, 36, 45, 55])
+    turns = rnd.choice([2, 3, 3, 4, 4, 5])
     prompt = PLAN_PROMPT.format(n=per_call, kinds="\n".join(
-        f"  {k}: {v}" for k, v in STEP_KINDS.items()), lo=lo, hi=hi)
+        f"  {k}: {v}" for k, v in STEP_KINDS.items()),
+        total=total, turns=turns)
     try:
         raw = ollama_chat(prompt, model, endpoint,
                           temperature=1.05 + (index % 3) * 0.05)

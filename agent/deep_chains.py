@@ -31,7 +31,13 @@ EOT = "\x03"
 # 95788332.05 while the verifier, unable to see that value anywhere, reports a
 # hallucination. A false alarm on correct behaviour is the failure mode that
 # gets a safety check disabled.
-_NUM = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+# Thousands separators must be consumed as part of the number. Without the
+# first alternative, "6,650 km" parses as the two numbers 6 and 650, and a
+# chain that looks up a river length then computes on it silently uses 6.
+# The comma branch is listed first so it wins the alternation.
+_NUM = re.compile(
+    r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?"
+    r"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
 
 
 def numbers_in(text: str) -> set:
@@ -50,7 +56,7 @@ def numbers_in_order(text: str) -> list:
     out = []
     for m in _NUM.finditer(str(text)):
         try:
-            v = float(m.group(0))
+            v = float(m.group(0).replace(",", ""))
         except ValueError:
             continue
         out.append(_canon(v))
@@ -62,7 +68,7 @@ def floats_in_order(text: str) -> list:
     out = []
     for m in _NUM.finditer(str(text)):
         try:
-            out.append(float(m.group(0)))
+            out.append(float(m.group(0).replace(",", "")))
         except ValueError:
             continue
     return out
@@ -95,6 +101,21 @@ def _canon(v) -> str:
     if f.is_integer() and abs(f) < 1e15:
         return str(int(f))
     return f"{f:.10g}"
+
+
+# A value is usable as a QUANTITY only if it leads with its number. "150 years"
+# and "6,650 km" are quantities; "O(1) insert" is notation whose 1 is not a
+# measurement. Scraping that 1 and computing on it satisfies grounding - the
+# digit really is in prior context - while being semantically meaningless, and
+# it teaches the model that any digit anywhere is a valid operand.
+_LEADING_QUANTITY = re.compile(
+    r"^-?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:\s|$)"
+    r"|^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?:\s|$)")
+
+
+def is_quantity(value) -> bool:
+    """True when a value can be used as a number in arithmetic."""
+    return bool(_LEADING_QUANTITY.match(str(value).strip()))
 
 
 class GroundingError(ValueError):
@@ -193,8 +214,8 @@ def lookup_pipeline(builder: DeepChainBuilder, hops: int, facts: dict,
     exists to prevent. The verifier caught it on 600 of 3000 traces.
     """
     rng = builder.rng
-    numeric_facts = [k for k, v in facts.items() if floats_in_order(v)]
-    numeric_mem = [k for k, v in memory.items() if floats_in_order(v)]
+    numeric_facts = [k for k, v in facts.items() if is_quantity(v)]
+    numeric_mem = [k for k, v in memory.items() if is_quantity(v)]
     if not numeric_facts:
         return arithmetic_pipeline(builder, hops)
 

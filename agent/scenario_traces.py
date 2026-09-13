@@ -21,8 +21,8 @@ chain must adapt - which is precisely what breaks 25-60 call tasks in practice.
 import json
 import random
 
-from agent.deep_chains import (_canon, floats_in_order, GroundingError,
-                               verify_trace)
+from agent.deep_chains import (_canon, floats_in_order, is_quantity,
+                               GroundingError, verify_trace)
 from agent.tools import Toolbox
 from agent.repo_tools import attach_repo_tools
 
@@ -49,8 +49,11 @@ class ScenarioInstantiator:
         self.sandbox_pool = sandbox_pool or []
         self.toolbox = attach_repo_tools(
             Toolbox(memory=memory, web_kb=facts or None))
-        self.numeric_facts = [k for k, v in facts.items() if floats_in_order(v)]
-        self.numeric_mem = [k for k, v in memory.items() if floats_in_order(v)]
+        # Only values that LEAD with a number are usable as quantities.
+        # "O(1) insert" contains a 1, but computing on it is meaningless and
+        # teaches the model that any digit anywhere is a valid operand.
+        self.numeric_facts = [k for k, v in facts.items() if is_quantity(v)]
+        self.numeric_mem = [k for k, v in memory.items() if is_quantity(v)]
 
     # ------------------------------------------------------------------
     def _aj(self, thought, response=None, tool_call=None) -> str:

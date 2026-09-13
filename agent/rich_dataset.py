@@ -79,10 +79,9 @@ class TraceComposer:
         # deterministic, so identical calls are memoized during generation.
         self._repo_cache = {}
         # Facts whose value starts with a number can feed arithmetic chains.
-        self.numeric_facts = {
-            k: v for k, v in self.facts.items()
-            if self._leading_number(v) is not None
-        }
+        from agent.deep_chains import is_quantity
+        self.numeric_facts = {k: v for k, v in self.facts.items()
+                              if is_quantity(v)}
 
     # ------------------------------------------------------------ helpers
     @staticmethod
