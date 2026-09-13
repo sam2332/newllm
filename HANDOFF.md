@@ -218,3 +218,61 @@ This is a 25-75M parameter byte-level model. The architecture and data pipeline
 are now sound and the numbers above are real, but frontier-model behaviour is
 several orders of magnitude away in both parameters and training tokens. Judge
 changes against the battery and the chat eval, not against general capability.
+
+## Background jobs kept dying: two separate causes
+
+Several long runs were lost. They had two unrelated causes, and conflating them
+cost most of a night.
+
+### 1. systemd user manager was not lingering
+
+`Linger=no` means systemd terminates the user's service manager when the last
+login session ends, taking every `--user` unit with it. A run launched at
+06:02:31 was gone by 06:12:55, which is when the user manager itself restarted.
+`nohup` and `setsid` do not help: the whole user slice goes.
+
+Fixed with `loginctl enable-linger lmeadows` (now `Linger=yes`). Verify with:
+
+```bash
+loginctl show-user lmeadows -p Linger
+```
+
+A run's log stopping at exactly 4096 bytes is the signature - one filesystem
+block buffered and never flushed because the process was killed.
+
+### 2. Suspected power loss under dual-GPU load
+
+The machine hard-rebooted while both GPUs were at ~85%. Combined draw at stock
+limits:
+
+| GPU | default limit | max |
+|-----|---------------|-----|
+| RTX 4090 | 450 W | 600 W |
+| RTX 5090 | 575 W | 600 W |
+
+That is 1025 W of GPU before the CPU (128-core EPYC-class) and the rest of the
+system. If the PSU or circuit cannot sustain it, the machine browns out under
+sustained load - which matches training dying rather than idling dying.
+
+**This is a hypothesis, not a confirmed diagnosis.** To isolate it, run on GPU 1
+only (`CUDA_VISIBLE_DEVICES=1`, single process, no torchrun) and see whether a
+long run survives. If it does, the dual-GPU power draw is implicated.
+
+Capping power would be the mitigation, but it needs root:
+
+```bash
+sudo nvidia-smi -i 0 -pl 300
+sudo nvidia-smi -i 1 -pl 400
+```
+
+Unprivileged attempts fail with "Insufficient Permissions".
+
+### What survives a power cut
+
+- Training checkpoints every `--save-every` steps, written atomically, resumed
+  with `--resume`. Losing a run costs about a minute, not hours.
+- The dataset cache under `data/cache/` rebuilds in ~95 s and is reused across
+  runs, so a restart does not repeat it.
+- Git has been corrupted once by a power cut (a zero-byte object left HEAD
+  unreachable). It was recoverable from the reflog. Run `git fsck` after any
+  hard reboot before trusting the repo.
