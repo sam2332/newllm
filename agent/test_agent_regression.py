@@ -34,7 +34,10 @@ BASE_CASES = [
     {"question": "What is 7 * 6?", "expected": "42", "kind": "numeric"},
     {"question": "Look up the version.", "expected": "0.1", "kind": "exact"},
     {"question": "Add 5 to the version.", "expected": "5.1", "kind": "numeric"},
-    {"question": "Multiply 3 and 4, then add the length of the leader.", "expected": "16", "kind": "numeric"},
+    # The string-length templates were retired from the dataset, so the old
+    # "length of the leader" case was unanswerable and always failed. Replaced
+    # with the grounded chain the generator actually produces.
+    {"question": "Multiply 3 and 4, then add the stored version.", "expected": "12.1", "kind": "numeric"},
 ]
 
 # Extra web_search cases. These are only required when the --web flag is set,
@@ -46,7 +49,8 @@ WEB_CASES = [
     {"question": "What is the speed of light?", "expected": "299792458 m/s", "kind": "exact"},
     {"question": "Look up the boiling point of water.", "expected": "100 degrees Celsius", "kind": "exact"},
     {"question": "What is the largest planet?", "expected": "Jupiter", "kind": "exact"},
-    {"question": "What is the capital of japan plus 5?", "expected": "10", "kind": "numeric"},
+    # Also retired string-length arithmetic; replaced with grounded chains.
+    {"question": "Look up the number of planets, add 5, then multiply by 2.", "expected": "26", "kind": "numeric"},
     {"question": "How many planets are there times 2?", "expected": "16", "kind": "numeric"},
 ]
 

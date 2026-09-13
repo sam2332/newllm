@@ -6,7 +6,7 @@ import os
 def pytest_addoption(parser):
     parser.addoption(
         "--checkpoint",
-        default=os.environ.get("CHECKPOINT", "checkpoints/agent_best.pt"),
+        default=os.environ.get("CHECKPOINT", "checkpoints_v2_M/agent_best.pt"),
         help="Path to the agent checkpoint to evaluate",
     )
     parser.addoption(

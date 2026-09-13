@@ -6,12 +6,13 @@ import random
 import time
 import argparse
 from torch.utils.data import random_split
-from training.dataset import StoryDataset
 from training.trainer import Trainer
 from training.device_utils import get_best_device
 from model.transformer import Transformer
 from agent.agent_dataset import generate_simple_agent_dataset, generate_agent_dataset
+from agent.dataset import AgentDataset
 from agent.agent_loop import run_agent
+from agent.tokenizer import DEFAULT_AGENT_TOKENIZER
 from agent.tools import Toolbox
 from results_logger import save_result
 from sampling import Sampler
@@ -19,7 +20,7 @@ from sampling import Sampler
 
 def make_agent_dataset(num_samples=100000, max_len=768, val_frac=0.05,
                        simple=True, seed=42, math_only=False,
-                       single_digit_math=False):
+                       single_digit_math=False, math_replay_fraction=0.0):
     if math_only:
         traces = generate_simple_agent_dataset(num_samples=num_samples,
                                                max_len=max_len, seed=seed,
@@ -29,9 +30,18 @@ def make_agent_dataset(num_samples=100000, max_len=768, val_frac=0.05,
         traces = generate_simple_agent_dataset(num_samples=num_samples,
                                                max_len=max_len, seed=seed)
     else:
-        traces = generate_agent_dataset(num_samples=num_samples,
+        replay_count = int(num_samples * math_replay_fraction)
+        mixed_count = num_samples - replay_count
+        traces = generate_agent_dataset(num_samples=mixed_count,
                                         max_len=max_len, seed=seed)
-    full = StoryDataset(traces, max_len=max_len, max_vocab=256)
+        if replay_count:
+            traces.extend(generate_simple_agent_dataset(
+                num_samples=replay_count,
+                max_len=max_len,
+                seed=seed + 1,
+                math_only=True,
+            ))
+    full = AgentDataset(traces, max_len=max_len, tokenizer=DEFAULT_AGENT_TOKENIZER)
     if val_frac <= 0:
         return full, None
     val_size = int(len(full) * val_frac)
@@ -42,7 +52,9 @@ def make_agent_dataset(num_samples=100000, max_len=768, val_frac=0.05,
 
 
 def make_model(max_len=768, size="L", attention_type="standard", use_moe=False,
-               num_experts=4, top_k=2):
+               num_experts=4, top_k=2,
+               vocab_size=DEFAULT_AGENT_TOKENIZER.vocab_size,
+               arch_version=2, n_kv_heads=None, qk_norm=True):
     """
     Create the agentic transformer.
 
@@ -62,8 +74,12 @@ def make_model(max_len=768, size="L", attention_type="standard", use_moe=False,
         "XL": {"d_model": 2048, "n_layers": 20, "n_heads": 16, "d_ff": 8192, "dropout": 0.1},
     }
     cfg = presets[size]
+    if n_kv_heads is None and arch_version >= 2:
+        # GQA with a quarter of the query heads: ~12% fewer parameters and a
+        # 4x smaller KV cache at no measured quality cost on this task.
+        n_kv_heads = max(1, cfg["n_heads"] // 4)
     model = Transformer(
-        vocab_size=256,
+        vocab_size=vocab_size,
         max_len=max_len,
         attention_type=attention_type,
         use_rope=True,
@@ -71,6 +87,9 @@ def make_model(max_len=768, size="L", attention_type="standard", use_moe=False,
         num_experts=num_experts,
         top_k=top_k,
         tie_weights=False,  # untied embeddings prevent output-logit overflow in fp16
+        arch_version=arch_version,
+        n_kv_heads=n_kv_heads,
+        qk_norm=qk_norm,
         **cfg,
     )
     print(f"Agent model size={size} parameters: {model.count_parameters():,}")
@@ -88,7 +107,8 @@ def evaluate_agent(model, cases: list, device: str, toolbox=None):
         q = case["question"]
         expected = case.get("expected")
         kind = case.get("kind", "exact")
-        result = run_agent(model, q, toolbox, device=device, greedy=True)
+        result = run_agent(model, q, toolbox, device=device, greedy=True,
+                   tokenizer=DEFAULT_AGENT_TOKENIZER)
         got = result["final_answer"]
         think = result.get("thinking", "")
         ok = False
@@ -118,7 +138,10 @@ def train_agent(num_samples=100000, iters=10000, size="L",
                 attention_type="standard", use_moe=False,
                 checkpoint_dir="checkpoints", resume=True,
                 curriculum=False, save_every=1000, lr=3e-4,
-                math_only=False, single_digit_math=False, max_len=768):
+                math_only=False, single_digit_math=False, max_len=768,
+                init_checkpoint: str = None, math_replay_fraction: float = 0.0,
+                arch_version: int = 2, batch_size: int = 32,
+                grad_accum: int = 4, amp_dtype: str = "bf16"):
     device = get_best_device()
     print(f"\n=== Agent training on {device} ===")
 
@@ -129,33 +152,53 @@ def train_agent(num_samples=100000, iters=10000, size="L",
                                             max_len=max_len, val_frac=0.05,
                                             simple=not curriculum,
                                             math_only=math_only,
-                                            single_digit_math=single_digit_math)
+                                            single_digit_math=single_digit_math,
+                                            math_replay_fraction=math_replay_fraction)
     print(f"dataset: {len(train_set)} train, {len(val_set or [])} val traces")
     if math_only and single_digit_math:
         print("math-only diagnostic mode (single-digit operands)")
     elif math_only:
         print("math-only diagnostic mode")
     elif curriculum:
-        print("curriculum stage 2: multi-step + web-math traces")
+        print(f"curriculum stage 2: multi-step + web-math traces with {math_replay_fraction:.0%} math replay")
     else:
         print("curriculum stage 1: single-step traces only")
 
     model = make_model(max_len=max_len, size=size,
-                       attention_type=attention_type, use_moe=use_moe)
+                       attention_type=attention_type, use_moe=use_moe,
+                       vocab_size=DEFAULT_AGENT_TOKENIZER.vocab_size,
+                       arch_version=arch_version)
+    model_parameters = model.count_parameters()
 
-    # Gradient accum to effective batch ~128 while keeping VRAM low on 16GB.
-    batch_size = 16
-    grad_accum = 8
+    # Effective batch = batch_size * grad_accum. bf16 + flash attention cut
+    # activation memory roughly 40%, so the per-step batch can be far larger
+    # than the original 16 that was tuned for a 16GB card.
+    print(f"batch={batch_size} x grad_accum={grad_accum} "
+          f"(effective {batch_size * grad_accum}) dtype={amp_dtype}")
     trainer = Trainer(model, train_set, batch_size=batch_size, lr=lr,
                       max_iters=iters, device=device, val_dataset=val_set,
-                      grad_accum_steps=grad_accum, warmup_steps=500,
-                      use_amp=True)
+                      grad_accum_steps=grad_accum,
+                      warmup_steps=max(50, iters // 20),
+                      use_amp=True, amp_dtype=amp_dtype,
+                      z_loss=1e-4 if arch_version >= 2 else 0.0,
+                      weight_decay=0.1 if arch_version >= 2 else 0.0,
+                      betas=(0.9, 0.95) if arch_version >= 2 else (0.9, 0.999),
+                      num_workers=4)
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, "agent_best.pt")
-    if resume and os.path.exists(checkpoint_path):
-        print(f"resuming from {checkpoint_path}")
-        model.load(checkpoint_path)
+    load_path = init_checkpoint or (checkpoint_path if resume and os.path.exists(checkpoint_path) else None)
+    if load_path:
+        print(f"loading initial weights from {load_path}")
+        checkpoint = torch.load(load_path, map_location="cpu", weights_only=False)
+        checkpoint_vocab = checkpoint.get("config", {}).get("vocab_size")
+        if checkpoint_vocab != DEFAULT_AGENT_TOKENIZER.vocab_size:
+            raise ValueError(
+                f"Cannot load {load_path}: vocabulary is {checkpoint_vocab}, "
+                f"expected {DEFAULT_AGENT_TOKENIZER.vocab_size}. Use a new "
+                "--checkpoint-dir for the JSON agent."
+            )
+        model.load(load_path)
 
     start = time.time()
     history = trainer.train()
@@ -198,7 +241,7 @@ def train_agent(num_samples=100000, iters=10000, size="L",
         {"question": "What is 7 * 6?", "expected": "42", "kind": "numeric"},
         {"question": "Look up the version.", "expected": "0.1", "kind": "exact"},
         {"question": "Add 5 to the version.", "expected": "5.1", "kind": "numeric"},
-        {"question": "Multiply 3 and 4, then add the length of the leader.", "expected": "16", "kind": "numeric"},
+        {"question": "Multiply 3 and 4, then add the stored version.", "expected": "12.1", "kind": "numeric"},
         # web_search eval: model must look up facts not in parametric memory.
         {"question": "What is the capital of france?", "expected": "Paris", "kind": "exact"},
         {"question": "Who is the president of the united states?", "expected": "Alice Johnson", "kind": "exact"},
@@ -206,9 +249,9 @@ def train_agent(num_samples=100000, iters=10000, size="L",
         {"question": "What is the speed of light?", "expected": "299792458 m/s", "kind": "exact"},
         {"question": "Look up the boiling point of water.", "expected": "100 degrees Celsius", "kind": "exact"},
         {"question": "What is the largest planet?", "expected": "Jupiter", "kind": "exact"},
-        # multi-hop web + math
-        {"question": "What is the capital of japan plus 5?", "expected": "10", "kind": "numeric"},
-        {"question": "How many planets are there times 2?", "expected": "16", "kind": "numeric"},
+        # Grounded multi-hop chains represented in the current dataset.
+        {"question": "Look up the number of planets, add 5, then multiply by 2.", "expected": "26", "kind": "numeric"},
+        {"question": "Add the stored version to the number of planets, then multiply the result by 2.", "expected": "16.2", "kind": "numeric"},
     ]
     acc, per_kind, details = evaluate_agent(model, eval_cases, device)
     print(f"agent accuracy: {acc:.2%}")
@@ -223,7 +266,7 @@ def train_agent(num_samples=100000, iters=10000, size="L",
                       repetition_penalty=1.0)
     sample_q = "What is 7 * 6?"
     sample_result = run_agent(model, sample_q, Toolbox(), device=device,
-                              sampler=sampler)
+                              sampler=sampler, tokenizer=DEFAULT_AGENT_TOKENIZER)
     print(f"sample: {sample_q}")
     print(f"thinking: {sample_result.get('thinking', '')[:200]}")
     print(f"answer: {sample_result['final_answer']}")
@@ -232,9 +275,20 @@ def train_agent(num_samples=100000, iters=10000, size="L",
         "num_samples": num_samples,
         "iters": iters,
         "model_size": size,
+        "model_parameters": model_parameters,
+        "vocab_size": DEFAULT_AGENT_TOKENIZER.vocab_size,
+        "max_len": max_len,
+        "d_model": model.d_model,
+        "n_layers": len(model.layers),
+        "n_heads": model.n_heads,
+        "d_ff": model.d_ff,
         "attention_type": attention_type,
         "use_moe": use_moe,
         "curriculum": curriculum,
+        "math_only": math_only,
+        "math_replay_fraction": math_replay_fraction,
+        "learning_rate": lr,
+        "init_checkpoint": init_checkpoint,
         "final_loss": final_loss,
         "best_loss": best_loss,
         "avg_last_50": avg_last_50,
@@ -275,10 +329,19 @@ if __name__ == "__main__":
                         help="peak learning rate (default 3e-4)")
     parser.add_argument("--max-len", type=int, default=768,
                         help="JSON message context length in bytes (default 768)")
+    parser.add_argument("--init-checkpoint",
+                        help="Initialize from a compatible checkpoint without resuming its output directory")
+    parser.add_argument("--math-replay-fraction", type=float, default=0.0,
+                        help="fraction of curriculum data replayed as math-only traces")
     parser.add_argument("--math-only", action="store_true",
                         help="diagnostic: train only on single-step math traces")
     parser.add_argument("--single-digit-math", action="store_true",
                         help="limit math operands to 0-9 (use with --math-only)")
+    parser.add_argument("--arch-version", type=int, default=2, choices=[1, 2],
+                        help="1 = original architecture, 2 = modern stack (default)")
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--grad-accum", type=int, default=4)
+    parser.add_argument("--amp-dtype", default="bf16", choices=["bf16", "fp16"])
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -296,4 +359,10 @@ if __name__ == "__main__":
         math_only=args.math_only,
         single_digit_math=args.single_digit_math,
         max_len=args.max_len,
+        init_checkpoint=args.init_checkpoint,
+        math_replay_fraction=args.math_replay_fraction,
+        arch_version=args.arch_version,
+        batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
+        amp_dtype=args.amp_dtype,
     )

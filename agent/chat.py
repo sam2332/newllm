@@ -6,6 +6,7 @@ import torch
 
 from model.transformer import Transformer
 from agent.agent_loop import run_agent, EOT
+from agent.tokenizer import AgentTokenizer, DEFAULT_AGENT_TOKENIZER
 from agent.tools import Toolbox
 from sampling import Sampler
 
@@ -15,8 +16,25 @@ def load_checkpoint(path: str, device: str = "cuda") -> Transformer:
     cfg = ckpt.get("config", {})
     sd = ckpt["model"]
     vocab_size = cfg.get("vocab_size", 256)
+    current_vocab = DEFAULT_AGENT_TOKENIZER.vocab_size
+    if vocab_size < DEFAULT_AGENT_TOKENIZER.LEGACY_VOCAB_SIZE:
+        raise ValueError(
+            f"Checkpoint vocabulary is {vocab_size}, but the JSON agent requires "
+            f"at least {DEFAULT_AGENT_TOKENIZER.LEGACY_VOCAB_SIZE}. This is a "
+            "legacy checkpoint; train a fresh JSON-agent checkpoint in a "
+            "separate directory."
+        )
+    # A checkpoint from before the chat tokens were appended is still usable:
+    # ids 0-270 kept their meaning, so the model is built at its own vocabulary
+    # size rather than being rejected.
+    if vocab_size != current_vocab:
+        print(f"note: checkpoint vocab {vocab_size} != current {current_vocab}; "
+              f"use AgentTokenizer(max_vocab={vocab_size}) with this checkpoint "
+              f"(see load_tokenizer_for)")
     d_model = cfg.get("d_model", 1024)
-    n_layers = cfg.get("n_layers", 12)
+    # Derive layer count from the weights when the config predates it.
+    n_layers = cfg.get("n_layers") or len(
+        {k.split(".")[1] for k in sd if k.startswith("layers.")})
     max_len = cfg.get("max_len", 512)
 
     model = Transformer(
@@ -30,12 +48,29 @@ def load_checkpoint(path: str, device: str = "cuda") -> Transformer:
         use_rope=cfg.get("use_rope", True),
         dropout=cfg.get("dropout", 0.1),
         tie_weights=cfg.get("tie_weights", False),
+        # Default to 1: a checkpoint without this key predates arch_version=2.
+        arch_version=cfg.get("arch_version", 1),
+        n_kv_heads=cfg.get("n_kv_heads"),
+        qk_norm=cfg.get("qk_norm", True),
     )
     model.load_state_dict(sd)
     model.to(device)
     model.eval()
     print(f"Loaded checkpoint from {path} ({model.count_parameters():,} params)")
     return model
+
+
+def load_tokenizer_for(model) -> AgentTokenizer:
+    """Return a tokenizer restricted to this model's vocabulary.
+
+    Always use this instead of the module-level default when the checkpoint may
+    predate the chat tokens; otherwise the tokenizer can emit ids the model has
+    no embedding row for.
+    """
+    size = getattr(model, "vocab_size", DEFAULT_AGENT_TOKENIZER.vocab_size)
+    if size == DEFAULT_AGENT_TOKENIZER.vocab_size:
+        return DEFAULT_AGENT_TOKENIZER
+    return AgentTokenizer(max_vocab=size)
 
 
 def _print_trace(result: dict):
@@ -64,7 +99,8 @@ def chat_mode(model: Transformer, toolbox: Toolbox, device: str):
         if question.lower() in {"exit", "quit", "q"}:
             break
         result = run_agent(model, question, toolbox, device=device,
-                           sampler=sampler, max_steps=5, max_new=400)
+                           sampler=sampler, max_steps=5, max_new=400,
+                           tokenizer=load_tokenizer_for(model))
         _print_trace(result)
 
 
@@ -72,7 +108,8 @@ def test_mode(model: Transformer, toolbox: Toolbox, device: str, questions: list
     print(f"\nRunning {len(questions)} test questions...")
     for q in questions:
         result = run_agent(model, q, toolbox, device=device, greedy=True,
-                           max_steps=5, max_new=400)
+                           max_steps=5, max_new=400,
+                           tokenizer=load_tokenizer_for(model))
         print(f"Q: {q}")
         print(f"A: {result['final_answer']}")
         if result.get("thinking"):
@@ -86,7 +123,7 @@ def main():
     )
     parser.add_argument(
         "--checkpoint", "-c",
-        default="checkpoints/agent_best.pt",
+        default=os.environ.get("CHECKPOINT", "checkpoints_v2_M/agent_best.pt"),
         help="Path to the model checkpoint to load",
     )
     parser.add_argument(
@@ -114,8 +151,8 @@ def main():
             "How many planets are there?",
             "What is the speed of light?",
             "What is the largest planet?",
-            "What is the capital of japan plus 5?",
             "How many planets are there times 2?",
+            "Look up the number of planets, add 5, then multiply by 2.",
         ],
         help="Questions for test mode",
     )
