@@ -297,10 +297,16 @@ def main():
     # Unwrap DDP before saving so the checkpoint has plain parameter names.
     to_save = model.module if isinstance(model, DistributedDataParallel) else model
     to_save.save(path)
-    # The run completed, so the resume state is no longer needed.
+    # Only a run that reached --iters is finished. An early stop is a judgement
+    # call by a 17-case battery, and the usual response is to loosen the
+    # patience and carry on - which needs the optimizer state that was about to
+    # be deleted here. Keep it unless the schedule actually ran out.
     resume_file = path + ".resume"
-    if os.path.exists(resume_file):
+    if os.path.exists(resume_file) and not trainer.stopped_early:
         os.remove(resume_file)
+    elif trainer.stopped_early:
+        print(f"kept {resume_file} so a looser --eval-patience can continue "
+              f"from step {len(trainer.history)} rather than restarting")
     meta = {
         "mode": args.mode, "size": args.size,
         "params": to_save.count_parameters(),
