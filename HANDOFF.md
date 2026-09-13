@@ -343,3 +343,60 @@ Three bugs made segmented runs unsafe before this; all three are fixed:
    patience reset to zero each segment.
 3. `train_split.py` deleted the `.resume` file whenever `train()` returned. With
    a time-budget stop that would have deleted the state the next segment needs.
+
+## Where the schema-trained model actually stands
+
+Single-GPU run on the 5090, 12,000 iterations, 41.5 minutes, no power incident.
+`checkpoints_schema_M/agent_best.pt`, best val 0.0709, final train loss 0.054.
+
+The 17-case battery reports 17.6%. That is **3 cases out of 17** - the battery
+cannot resolve anything finer than 5.9 points, and 13 of its 17 cases are
+single-hop toy questions, so it is not a sample of the training distribution.
+Use `scripts/eval_random.py`, which scores held-out traces from the same split
+and seed the trainer used:
+
+```bash
+.venv/bin/python scripts/eval_random.py checkpoints_schema_M/agent_best.pt -n 100
+```
+
+**22/100 on random held-out traces (95% CI 15-31%).** By chain depth:
+
+| tool calls in reference | score | 95% CI |
+|-------------------------|-------|--------|
+| 1    |  7/20 (35%) | 18-57% |
+| 2    |  9/12 (75%) | 47-91% |
+| 3    |  5/19 (26%) | 12-49% |
+| 4+   |  1/49 ( 2%) |  0-11% |
+
+**Half the held-out distribution needs 4 or more tool calls, and the model gets
+1 of 49.** That single bucket is the entire result: bring 4+ chains to the level
+of the 2-call bucket and the overall number triples. Nothing else on the list
+matters as much.
+
+The per-bucket intervals are wide and overlap heavily - 1-call scoring below
+2-call is not a real inversion, just n=20 and n=12. Do not read depth-by-depth
+ordering from a 100-trace run; raise `-n` before drawing conclusions.
+
+Two harness defects were found writing this, both of which understated the
+score. They are fixed, and are worth knowing about before trusting any new eval:
+
+- `max_steps` defaulted to 8 while deep chains run past 12 hops, so those traces
+  scored 0 by construction. Now 20.
+- Scoring compared `run_agent`'s `final_answer` - which is the raw tool result,
+  because `_select_final_answer` prefers `steps[-1]["result"]` - against the
+  reference `"response"` sentence. A correct "20" was marked wrong against "The
+  answer is 20". It now checks the model's own response text as well.
+
+Both together were worth 2 points (20 -> 22), so the 4+ failures are real.
+
+### Early stopping is too aggressive for this battery
+
+The first run died at step 3,000 of 12,000: `--eval-patience 4` at
+`--eval-every 500` on a 17-case battery, where one case is 5.9 points and the
+early curve is pure noise. It restored step-1000 weights at val loss 0.239.
+
+The full run reached val 0.0709 - **3.4x better** - and the battery's first real
+signal did not appear until **step 7,000**, long past where patience-4 had
+already given up. Use `--eval-every 1000 --eval-patience 10`; it also halves the
+eval overhead, which is ~2 minutes per call and otherwise exceeds the training
+time.

@@ -23,7 +23,8 @@ sys.path.insert(0, "/home/lmeadows/llm")
 import torch
 from torch.utils.data import random_split
 
-from agent.agent_loop import run_agent, _extract_assistant_json
+from agent.agent_loop import (run_agent, _extract_assistant_json,
+                              _find_final_response)
 from agent.dataset_builder import PrebuiltDataset
 from agent.repo_tools import attach_repo_tools
 from agent.sandbox_tools import attach_sandbox_tools
@@ -87,8 +88,10 @@ def main():
     ap.add_argument("--seed", type=int, default=42,
                     help="must match the training seed to reproduce the split")
     ap.add_argument("--device", default="cuda")
-    ap.add_argument("--max-steps", type=int, default=8)
-    ap.add_argument("--max-new", type=int, default=160)
+    ap.add_argument("--max-steps", type=int, default=20,
+                    help="deep chains run past 12 hops; too low "
+                         "scores them 0 by construction")
+    ap.add_argument("--max-new", type=int, default=256)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -119,9 +122,19 @@ def main():
         r = run_agent(model, question, tb, device=args.device, greedy=True,
                       tokenizer=TOK, system=system,
                       max_steps=args.max_steps, max_new=args.max_new)
-        got = r["final_answer"] or ""
-        hit = norm(got) == norm(expected) or (
-            norm(expected) and norm(expected) in norm(got))
+        # Two things count as the model's answer, and they are different
+        # strings. final_answer is the raw tool result (_select_final_answer
+        # prefers steps[-1]["result"]), while the reference is the assistant's
+        # "response" sentence. Comparing only those two marks a correct "20"
+        # wrong against a reference of "The answer is 20".
+        tool_answer = r["final_answer"] or ""
+        said, _ = _find_final_response(r.get("trace") or "")
+        e = norm(expected)
+        hit = bool(e) and (
+            e == norm(said) or e in norm(said)
+            or e == norm(tool_answer)
+            or (norm(tool_answer) and norm(tool_answer) in e))
+        got = said or tool_answer
         ok += hit
         hops_ok[bucket] = hops_ok.get(bucket, 0) + hit
         if args.verbose:
