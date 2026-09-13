@@ -11,6 +11,7 @@ naturally. Every emitted trace is verified against the Toolbox before it is
 kept, and traces that fail verification are dropped and counted.
 """
 
+import collections
 import json
 import random
 
@@ -346,6 +347,98 @@ class TraceComposer:
         return msgs
 
 
+    # ------------------------------------------------- three-tool chains
+    def _chain(self, question, stages, think_names):
+        """Build an N-stage trace. Every observation comes from the Toolbox."""
+        msgs = [{"role": "user", "content": question}]
+        for i, (tool, args) in enumerate(stages):
+            observation = self._call(tool, args)
+            if observation.startswith("ERROR") or observation == "no results found":
+                self.dropped += 1
+                return None
+            last = i == len(stages) - 1
+            msgs.append({"role": "assistant", "content": self._aj(
+                self.thought(think_names[min(i, len(think_names) - 1)],
+                             "Next step."),
+                tool_call={"name": tool, "arguments": args})})
+            msgs.append({"role": "tool", "name": tool, "content": observation})
+            if last:
+                msgs.append({"role": "assistant", "content": self._aj(
+                    self.thought("chain_last", "The final answer is computed."),
+                    response=observation)})
+        return msgs
+
+    def p_web_two_stage(self):
+        """web_search -> calc -> calc (three tool calls)."""
+        if not self.numeric_facts:
+            return self.p_two_stage_math()
+        key = self.rng.choice(list(self.numeric_facts.keys()))
+        obs = self._call("web_search", {"query": key})
+        base = self._leading_number(obs)
+        if base is None:
+            self.dropped += 1
+            return None
+        a, b = self.rng.randint(2, 40), self.rng.randint(2, 12)
+        e1 = f"{self._num(base)} + {a}"
+        r1 = self._call("calc", {"expr": e1})
+        if r1.startswith("ERROR"):
+            self.dropped += 1
+            return None
+        e2 = f"{r1} * {b}"
+        q = f"Look up the {key}, add {a}, then multiply by {b}."
+        return self._chain(q, [("web_search", {"query": key}),
+                               ("calc", {"expr": e1}), ("calc", {"expr": e2})],
+                           ["web_call", "chain_first", "chain_first"])
+
+    def p_cross_source(self):
+        """search_memory -> web_search -> calc (three tools, two sources)."""
+        numeric_keys = [k for k, v in self.memory.items()
+                        if self._leading_number(v) is not None]
+        if not numeric_keys or not self.numeric_facts:
+            return self.p_two_stage_math()
+        mkey = self.rng.choice(numeric_keys)
+        wkey = self.rng.choice(list(self.numeric_facts.keys()))
+        m_obs = self._call("search_memory", {"key": mkey})
+        w_obs = self._call("web_search", {"query": wkey})
+        m_num, w_num = self._leading_number(m_obs), self._leading_number(w_obs)
+        if m_num is None or w_num is None:
+            self.dropped += 1
+            return None
+        op = self.rng.choice(["+", "*"])
+        expr = f"{self._num(m_num)} {op} {self._num(w_num)}"
+        word = "add it to" if op == "+" else "multiply it by"
+        q = f"Look up the stored {mkey}, then {word} the {wkey}."
+        return self._chain(q, [("search_memory", {"key": mkey}),
+                               ("web_search", {"query": wkey}),
+                               ("calc", {"expr": expr})],
+                           ["memory_call", "chain_first", "chain_first"])
+
+    def p_memory_two_stage(self):
+        """search_memory -> calc -> calc (three tool calls)."""
+        numeric_keys = [k for k, v in self.memory.items()
+                        if self._leading_number(v) is not None]
+        if not numeric_keys:
+            return self.p_two_stage_math()
+        key = self.rng.choice(numeric_keys)
+        obs = self._call("search_memory", {"key": key})
+        base = self._leading_number(obs)
+        if base is None:
+            self.dropped += 1
+            return None
+        a, b = self.rng.randint(2, 30), self.rng.randint(2, 10)
+        e1 = f"{self._num(base)} + {a}"
+        r1 = self._call("calc", {"expr": e1})
+        if r1.startswith("ERROR"):
+            self.dropped += 1
+            return None
+        e2 = f"{r1} * {b}"
+        q = (f"Multiply {a} and {b}, then add the stored {key}."
+             if self.rng.random() < 0.5
+             else f"Look up the {key}, add {a}, then multiply by {b}.")
+        return self._chain(q, [("search_memory", {"key": key}),
+                               ("calc", {"expr": e1}), ("calc", {"expr": e2})],
+                           ["memory_call", "chain_first", "chain_first"])
+
     # ------------------------------------------------- self-inspection
     def _repo_turn(self, question, tool, args, think_call, think_done,
                    max_obs=260, summarize=None):
@@ -509,16 +602,22 @@ class TraceComposer:
         ]
 
 
+# Weights matter more than they look. An earlier mix with 33% multi-step and
+# NO three-tool chains scored 52.9% on the battery with 0% on 3-hop questions,
+# against 88.2%/100% for a mix with 57% multi-step and 32% three-tool traces.
+# The model simply cannot learn a chain depth it has never seen, so keep
+# three-tool patterns well represented and the new tool families modest.
 INSTRUCT_PATTERNS = [
-    ("p_math", 16), ("p_memory", 10), ("p_web", 16), ("p_time", 6),
-    ("p_web_then_math", 13), ("p_memory_then_math", 10), ("p_two_stage_math", 13),
-    # self-inspection: the model learns to route questions about its own code
-    # to a tool rather than answering them from (nonexistent) parametric
-    # knowledge of the repository.
-    ("p_repo_symbol", 5), ("p_repo_search", 4), ("p_repo_read", 3),
-    ("p_repo_stats", 2), ("p_repo_list", 2),
-    # sandboxed code execution
-    ("p_sandbox", 10),
+    ("p_math", 11), ("p_memory", 7), ("p_web", 11), ("p_time", 5),
+    # two-tool chains
+    ("p_web_then_math", 11), ("p_memory_then_math", 9),
+    ("p_two_stage_math", 9),
+    # three-tool chains - the capability that collapsed when these were absent
+    ("p_web_two_stage", 11), ("p_cross_source", 10), ("p_memory_two_stage", 10),
+    # self-inspection, kept small so it does not crowd out chaining
+    ("p_repo_symbol", 2), ("p_repo_search", 2), ("p_repo_read", 1),
+    ("p_repo_stats", 1), ("p_repo_list", 1),
+    ("p_sandbox", 4),
 ]
 CHAT_PATTERNS = [
     ("p_chat_math_coref", 34), ("p_chat_topic_pair", 30),
@@ -545,6 +644,8 @@ def generate(pool: dict, num_samples: int, mode: str = "instruct",
     names = [n for n, _ in patterns]
     weights = [w for _, w in patterns]
     traces, too_long = [], 0
+    kept_by = collections.Counter()
+    dropped_by = collections.Counter()
     while len(traces) < num_samples:
         name = comp.rng.choices(names, weights=weights, k=1)[0]
         messages = getattr(comp, name)()
@@ -558,8 +659,32 @@ def generate(pool: dict, num_samples: int, mode: str = "instruct",
             text = _serialize_instruct(messages)
         if len(text) > max_len:
             too_long += 1
+            dropped_by[name] += 1
             continue
+        kept_by[name] += 1
         traces.append(text)
+
+    # A pattern that is mostly or entirely dropped for length teaches the model
+    # nothing, silently. This has now happened twice: once to the repo tools and
+    # once to the three-tool chains, where losing the pattern took 3-hop
+    # accuracy from 100% to 0%. Aggregate counts hid it both times, so report
+    # per pattern and refuse to be quiet about it.
+    starved = []
+    for name in names:
+        total = kept_by[name] + dropped_by[name]
+        if total and dropped_by[name] / total > 0.20:
+            starved.append((name, dropped_by[name] / total, kept_by[name]))
+    if starved:
+        print(f"WARNING: {len(starved)} pattern(s) losing >20% of traces to the "
+              f"max_len={max_len} limit:")
+        for name, rate, kept in sorted(starved, key=lambda x: -x[1]):
+            print(f"    {name:22s} {rate:4.0%} dropped, only {kept} kept")
+        print("    Raise --max-len or shorten these patterns; a starved "
+              "pattern is a capability the model cannot learn.")
+
     return traces, {"dropped_invalid": comp.dropped, "too_long": too_long,
                     "facts": len(comp.facts),
-                    "numeric_facts": len(comp.numeric_facts)}
+                    "numeric_facts": len(comp.numeric_facts),
+                    "kept_by_pattern": dict(kept_by),
+                    "dropped_by_pattern": dict(dropped_by),
+                    "starved_patterns": [n for n, _, _ in starved]}

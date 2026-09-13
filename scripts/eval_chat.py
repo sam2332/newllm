@@ -20,6 +20,8 @@ from model.transformer import Transformer
 from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
 from agent.agent_loop import run_chat
 from agent.tools import Toolbox
+from agent.repo_tools import attach_repo_tools
+from agent.sandbox_tools import attach_sandbox_tools
 
 CASES = [
     {"skill": "coref", "turns": ["What is 12 + 8?", "Multiply that by 3."],
@@ -70,8 +72,14 @@ def load(path, device="cuda"):
     return model.to(device).eval()
 
 
-def score(model, device="cuda", verbose=False, constrained=False):
+def score(model, device="cuda", verbose=False, constrained=False,
+          all_tools=True):
+    # The model is trained with the full 12-tool set. Evaluating it against a
+    # 5-tool box makes a correct repo/sandbox call read as "unknown tool",
+    # which measures the harness rather than the model.
     tb = Toolbox()
+    if all_tools:
+        tb = attach_sandbox_tools(attach_repo_tools(tb))
     by_skill, rows, correct = {}, [], 0
     t0 = time.time()
     for case in CASES:
@@ -105,6 +113,8 @@ if __name__ == "__main__":
     ap.add_argument("checkpoints", nargs="+")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("-c", "--constrained", action="store_true")
+    ap.add_argument("--base-tools", action="store_true",
+                    help="evaluate with only the original 5 tools")
     a = ap.parse_args()
     for path in a.checkpoints:
         print(f"\n=== {path} ===")
@@ -112,7 +122,8 @@ if __name__ == "__main__":
             m = load(path)
             print(f"  params {m.count_parameters():,} arch_v{m.arch_version} "
                   f"max_len={m.max_len}")
-            score(m, verbose=a.verbose, constrained=a.constrained)
+            score(m, verbose=a.verbose, constrained=a.constrained,
+                  all_tools=not a.base_tools)
             del m; torch.cuda.empty_cache()
         except Exception as e:
             print(f"  FAILED: {type(e).__name__}: {e}")

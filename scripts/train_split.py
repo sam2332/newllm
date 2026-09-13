@@ -34,7 +34,10 @@ PRESETS = {
     "L": dict(d_model=1024, n_layers=12, n_heads=16, d_ff=4096),
     "XL": dict(d_model=2048, n_layers=20, n_heads=16, d_ff=8192),
 }
-DEFAULT_MAX_LEN = {"instruct": 768, "chat": 2048}
+# instruct was 768 when the fact KB held 12 short toy facts. With 682 generated
+# facts the keys are much longer, and three-tool chains overflowed 768 - which
+# silently dropped 94% of the cross-source pattern. 1024 keeps 100%.
+DEFAULT_MAX_LEN = {"instruct": 1024, "chat": 2048}
 
 
 def build_traces(mode, pool_path, samples, max_len, seed):

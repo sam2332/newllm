@@ -46,7 +46,8 @@ class Transformer(nn.Module):
                  tie_weights: bool = False,
                  arch_version: int = 2,
                  n_kv_heads: int = None,
-                 qk_norm: bool = True):
+                 qk_norm: bool = True,
+                 grad_checkpoint: bool = False):
         super().__init__()
         self.d_model = d_model
         self.max_len = max_len
@@ -59,6 +60,11 @@ class Transformer(nn.Module):
         self.n_kv_heads = n_kv_heads or n_heads
         self.qk_norm = qk_norm
         self.vocab_size = vocab_size
+        # Recompute layer activations during the backward pass instead of
+        # storing them. Costs roughly one extra forward (~30% slower) and turns
+        # activation memory from O(n_layers * seq) into O(seq), which is what
+        # makes long-context training fit at all.
+        self.grad_checkpoint = grad_checkpoint
 
         # In v2 RoPE lives inside attention, so the encoder must not also
         # rotate the embedding (that was the original bug).
@@ -169,7 +175,10 @@ class Transformer(nn.Module):
         aux_total = None
         for index, layer in enumerate(self.layers):
             cache = caches[index] if caches is not None else None
-            if isinstance(layer, TransformerBlock):
+            if self.grad_checkpoint and self.training and cache is None:
+                out = torch.utils.checkpoint.checkpoint(
+                    layer, x, mask, use_reentrant=False)
+            elif isinstance(layer, TransformerBlock):
                 out = layer(x, mask, cache=cache)
             else:
                 out = layer(x, mask)
@@ -221,4 +230,5 @@ class Transformer(nn.Module):
             "tie_weights": self.tie_weights,
             "arch_version": self.arch_version,
             "qk_norm": self.qk_norm,
+            "grad_checkpoint": self.grad_checkpoint,
         }
