@@ -43,7 +43,8 @@ DEFAULT_MAX_LEN = {"instruct": 1024, "chat": 2048}
 
 
 def build_traces(mode, pool_path, samples, max_len, seed,
-                 deep_fraction=0.0, deep_min=4, deep_max=12, quiet=False):
+                 deep_fraction=0.0, deep_min=4, deep_max=12, quiet=False,
+                 scenarios_path=None, scenario_fraction=0.0):
     """Prefer the generated diversity pool; fall back to the built-ins."""
     if pool_path and os.path.exists(pool_path):
         from agent.rich_dataset import load_pool, generate
@@ -52,6 +53,27 @@ def build_traces(mode, pool_path, samples, max_len, seed,
                                  max_len=max_len, seed=seed,
                                  deep_fraction=deep_fraction,
                                  deep_min=deep_min, deep_max=deep_max)
+        scenario_traces = []
+        if scenarios_path and scenario_fraction and os.path.exists(scenarios_path):
+            import json as _json, random as _random
+            from agent.scenario_traces import generate_from_scenarios
+            from agent.tools import Toolbox
+            plans = _json.load(open(scenarios_path))
+            want = int(samples * scenario_fraction)
+            _rng = _random.Random(seed)
+
+            def _thought(situation, fallback):
+                opts = pool["thoughts"].get(situation)
+                return _rng.choice(opts) if opts else fallback
+
+            scenario_traces, s_stats = generate_from_scenarios(
+                plans, pool["facts"], Toolbox.DEFAULT_MEMORY, want,
+                rng_seed=seed, max_len=max_len, thought_fn=_thought,
+                sandbox_pool=pool.get("sandbox"))
+            samples = max(0, samples - len(scenario_traces))
+            if not quiet:
+                print(f"scenarios: {len(plans):,} plans -> "
+                      f"{len(scenario_traces):,} traces  {s_stats}")
         if not quiet:
             print(f"source: ollama pool {pool_path}")
             print(f"  facts={stats['facts']} numeric={stats['numeric_facts']} "
@@ -63,7 +85,7 @@ def build_traces(mode, pool_path, samples, max_len, seed,
                 deep = sum(v for k, v in hops.items() if k >= 10)
                 print(f"  deep chains: max {max(hops)} hops, "
                       f"{deep} traces with >=10 hops")
-        return traces
+        return traces + scenario_traces
     print(f"source: built-in generator (no pool at {pool_path})")
     if mode == "chat":
         from agent.chat_dataset import generate_chat_dataset
@@ -87,6 +109,10 @@ def main():
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--scenarios", default="data/scenarios.json",
+                    help="teacher-written scenario plans")
+    ap.add_argument("--scenario-fraction", type=float, default=0.0,
+                    help="fraction of the dataset built from scenario plans")
     ap.add_argument("--deep-fraction", type=float, default=0.0,
                     help="fraction of traces that are deep N-hop chains")
     ap.add_argument("--deep-min", type=int, default=4)
@@ -94,6 +120,10 @@ def main():
     ap.add_argument("--grad-checkpoint", action="store_true",
                     help="recompute activations in backward; ~30%% slower, "
                          "needed for long context")
+    ap.add_argument("--eval-every", type=int, default=500,
+                    help="score the task battery every N steps (0 = off)")
+    ap.add_argument("--eval-patience", type=int, default=4,
+                    help="stop after this many evals with no improvement")
     ap.add_argument("--save-every", type=int, default=250,
                     help="write resumable state every N iterations (0 = off)")
     ap.add_argument("--resume", action="store_true",
@@ -129,7 +159,9 @@ def main():
     traces = build_traces(args.mode, args.pool, args.samples, max_len, args.seed,
                           deep_fraction=args.deep_fraction,
                           deep_min=args.deep_min, deep_max=args.deep_max,
-                          quiet=not is_main)
+                          quiet=not is_main,
+                          scenarios_path=args.scenarios,
+                          scenario_fraction=args.scenario_fraction)
     ds = AgentDataset(traces, max_len=max_len, tokenizer=TOK)
     val_n = max(1, int(len(ds) * 0.05))
     train_set, val_set = random_split(
@@ -177,6 +209,20 @@ def main():
               f"{loaded} tensors loaded, {grown} grown, {skipped} skipped")
 
     path = os.path.join(out_dir, "agent_best.pt")
+
+    # Accuracy on a held-out battery, scored during training. Only rank 0 runs
+    # it; the other ranks would duplicate the work and interleave output.
+    eval_fn = None
+    if args.eval_every and is_main:
+        from scripts.eval_agent import CASES, score as _score
+        import contextlib, io
+
+        def eval_fn(m):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                acc, _ = _score(m, device=device, verbose=False)
+            return acc
+
     if ddp:
         model = model.to(device)
         model = DistributedDataParallel(model, device_ids=[local_rank],
@@ -189,7 +235,9 @@ def main():
                       weight_decay=0.1, betas=(0.9, 0.95), num_workers=4,
                       checkpoint_path=path if is_main else None,
                       save_every=args.save_every if is_main else 0,
-                      resume=args.resume, ddp=ddp)
+                      resume=args.resume, ddp=ddp,
+                      eval_fn=eval_fn, eval_every=args.eval_every,
+                      eval_patience=args.eval_patience)
     print(f"batch={args.batch_size} x {args.grad_accum} "
           f"(effective {args.batch_size * args.grad_accum}) lr={args.lr}")
 
@@ -220,11 +268,20 @@ def main():
         "lr": args.lr, "seed": args.seed,
         "effective_batch": args.batch_size * args.grad_accum,
         "best_val_loss": trainer.best_val_loss,
+        "best_accuracy": trainer.best_acc,
+        "best_accuracy_step": trainer.best_acc_step,
+        "eval_history": trainer.eval_history,
+        "stopped_early": trainer.stopped_early,
         "final_train_loss": sum(hist[-50:]) / 50,
         "minutes": dt / 60, "pool": args.pool,
         "vocab_size": TOK.vocab_size,
     }
     json.dump(meta, open(os.path.join(out_dir, "run.json"), "w"), indent=1)
+    if trainer.eval_history:
+        print("\naccuracy curve:")
+        for st, a in trainer.eval_history:
+            print(f"    step {st:6d}  {a:6.1%}"
+                  f"{'   <- best' if st == trainer.best_acc_step else ''}")
     print(f"\nbest_val={trainer.best_val_loss:.4f} "
           f"train_last50={meta['final_train_loss']:.4f} "
           f"time={dt/60:.1f}min")

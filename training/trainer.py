@@ -1,5 +1,6 @@
 """Live training runner with loss tracking and simple generation check."""
 
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,7 +30,10 @@ class Trainer:
                  checkpoint_path: str = None,
                  save_every: int = 0,
                  resume: bool = False,
-                 ddp: bool = False):
+                 ddp: bool = False,
+                 eval_fn=None,
+                 eval_every: int = 0,
+                 eval_patience: int = 4):
         if device is None:
             device = get_best_device()
         self.model = model.to(device)
@@ -97,6 +101,17 @@ class Trainer:
         else:
             self.val_loader = None
         self.ddp = ddp
+        # Task accuracy, not validation loss, is the signal that matters.
+        # Loss keeps falling while the model memorizes; accuracy is what turns
+        # over when it starts overfitting.
+        self.eval_fn = eval_fn
+        self.eval_every = eval_every
+        self.eval_patience = eval_patience
+        self.eval_history = []
+        self.best_acc = -1.0
+        self.best_acc_step = -1
+        self._best_acc_state = None
+        self.stopped_early = False
         self.checkpoint_path = checkpoint_path
         self.save_every = save_every
         self.start_step = 0
@@ -132,6 +147,57 @@ class Trainer:
         self._best_model_state = state.get("best_model_state")
         print(f"resumed from step {self.start_step} "
               f"(best_val={self.best_val_loss:.4f})")
+
+    def _run_eval(self, step: int, pbar=None):
+        """Score the task battery; keep the best weights. Returns True to stop.
+
+        Early stopping is on accuracy rather than loss because the two diverge
+        exactly when it matters: an overfitting model's training loss keeps
+        improving while its accuracy stalls or declines.
+        """
+        model = self._unwrapped()
+        was_training = model.training
+        model.eval()
+        try:
+            acc = float(self.eval_fn(model))
+        except Exception as exc:                              # noqa: BLE001
+            print(f"\n  [eval @ {step}] failed: {type(exc).__name__}: {exc}")
+            if was_training:
+                model.train()
+            return False
+        if was_training:
+            model.train()
+
+        self.eval_history.append((step, acc))
+        improved = acc > self.best_acc
+        if improved:
+            self.best_acc = acc
+            self.best_acc_step = step
+            self._best_acc_state = {k: v.detach().cpu().clone()
+                                    for k, v in model.state_dict().items()}
+            if self.checkpoint_path:
+                best = self.checkpoint_path.replace(".pt", "_bestacc.pt")
+                tmp = best + ".tmp"
+                torch.save({"model": self._best_acc_state,
+                            "config": model._get_config()
+                            if hasattr(model, "_get_config") else {},
+                            "accuracy": acc, "step": step}, tmp)
+                os.replace(tmp, best)
+
+        since = sum(1 for st, a in self.eval_history
+                    if st > self.best_acc_step)
+        marker = "BEST" if improved else f"no gain x{since}"
+        print(f"\n  [eval @ {step:5d}] accuracy {acc:.1%}  "
+              f"(best {self.best_acc:.1%} @ {self.best_acc_step}) {marker}",
+              flush=True)
+
+        if since >= self.eval_patience:
+            print(f"  early stop: {since} evaluations without improvement; "
+                  f"restoring step {self.best_acc_step} "
+                  f"({self.best_acc:.1%})", flush=True)
+            self.stopped_early = True
+            return True
+        return False
 
     def _unwrapped(self):
         return getattr(self.model, "module", self.model)
@@ -276,9 +342,20 @@ class Trainer:
             pbar.set_postfix(postfix)
             if self.save_every and step and step % self.save_every == 0:
                 self._save_resume_state(step)
-        # Restore the best validation-loss weights rather than the final ones.
-        if self._best_model_state is not None:
-            self.model.load_state_dict(self._best_model_state)
+
+            if self.eval_fn and self.eval_every and step \
+                    and step % self.eval_every == 0:
+                if self._run_eval(step, pbar):
+                    break
+        # Prefer the best *accuracy* weights when a task eval was running;
+        # fall back to best validation loss otherwise.
+        target = self._unwrapped()
+        if self._best_acc_state is not None:
+            target.load_state_dict(self._best_acc_state)
+            print(f"restored best-accuracy weights: {self.best_acc:.1%} "
+                  f"@ step {self.best_acc_step}")
+        elif self._best_model_state is not None:
+            target.load_state_dict(self._best_model_state)
         return self.history
 
 
