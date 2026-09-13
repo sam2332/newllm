@@ -132,6 +132,12 @@ _WEB_KB = {
 }
 
 
+def _number_text(value: float) -> str:
+    """Format a number exactly as the calculator returns integer results."""
+    numeric = float(value)
+    return str(int(numeric)) if numeric.is_integer() else str(numeric)
+
+
 def _web_lookup(query: str) -> str:
     q = query.strip().lower().rstrip("?")
     if q in _WEB_KB:
@@ -173,17 +179,18 @@ def _web_then_math(rng: random.Random) -> list:
         numeric = float(len(value))
     delta = rng.randint(1, 100)
     op = rng.choice(["+", "-", "*"])
+    numeric_text = _number_text(numeric)
     if op == "+":
         ans = numeric + delta
-        expr = f"{numeric} + {delta}"
+        expr = f"{numeric_text} + {delta}"
         op_word = "add"
     elif op == "-":
         ans = numeric - delta
-        expr = f"{numeric} - {delta}"
+        expr = f"{numeric_text} - {delta}"
         op_word = "subtract"
     else:
         ans = numeric * delta
-        expr = f"{numeric} * {delta}"
+        expr = f"{numeric_text} * {delta}"
         op_word = "multiply by"
     templates = [
         f"What is the {key} {op_word} {delta}?",
@@ -199,29 +206,25 @@ def _web_then_math(rng: random.Random) -> list:
         {"role": "assistant", "content": _assistant_json(
             "Now I can combine it with arithmetic.",
             tool_call={"name": "calc", "arguments": {"expr": expr}})},
-        {"role": "tool", "name": "calc", "content": str(ans)},
+        {"role": "tool", "name": "calc", "content": _number_text(ans)},
         {"role": "assistant", "content": _assistant_json(
             "The final answer is computed.",
-            response=str(ans))},
+            response=_number_text(ans))},
     ]
 
 
 def _multi_hop_question(rng: random.Random, memory: dict) -> list:
-    key = rng.choice(list(memory.keys()))
+    key = "version"
     a = rng.randint(2, 50)
     b = rng.randint(2, 50)
     raw = memory[key]
-    length = len(raw) if isinstance(raw, str) else 0
-    op = rng.choice(["+", "*"])
-    if op == "+":
-        ans = a * b + length
-        expr = f"{a} * {b} + {length}"
-    else:
-        ans = a * b * length
-        expr = f"{a} * {b} * {length}"
+    base = float(raw)
+    first_result = a * b
+    ans = first_result + base
+    expr = f"{first_result} + {base}"
     templates = [
-        f"Multiply {a} and {b}, then {op} the length of the {key}.",
-        f"Compute {a} times {b} and {op} the number of characters in the {key}.",
+        f"Multiply {a} and {b}, then add the stored {key}.",
+        f"Compute {a} times {b} and add the {key} value.",
     ]
     question = rng.choice(templates)
     return [
@@ -229,9 +232,9 @@ def _multi_hop_question(rng: random.Random, memory: dict) -> list:
         {"role": "assistant", "content": _assistant_json(
             "First I will multiply the two numbers.",
             tool_call={"name": "calc", "arguments": {"expr": f"{a} * {b}"}})},
-        {"role": "tool", "name": "calc", "content": str(a * b)},
+        {"role": "tool", "name": "calc", "content": str(first_result)},
         {"role": "assistant", "content": _assistant_json(
-            f"Then I need the length of the stored value '{key}'.",
+            f"Then I need the stored {key} value.",
             tool_call={"name": "search_memory", "arguments": {"key": key}})},
         {"role": "tool", "name": "search_memory", "content": str(raw)},
         {"role": "assistant", "content": _assistant_json(
@@ -244,16 +247,114 @@ def _multi_hop_question(rng: random.Random, memory: dict) -> list:
     ]
 
 
+def _two_stage_math_question(rng: random.Random) -> list:
+    """Three calculator turns where each expression uses the prior result."""
+    a = rng.randint(2, 30)
+    b = rng.randint(2, 30)
+    delta = rng.randint(1, 25)
+    factor = rng.randint(2, 10)
+    first = a * b
+    second = first + delta
+    answer = second * factor
+    question = (
+        f"Multiply {a} by {b}, add {delta} to that result, then multiply "
+        f"the result by {factor}."
+    )
+    return [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": _assistant_json(
+            "First I will calculate the product.",
+            tool_call={"name": "calc", "arguments": {"expr": f"{a} * {b}"}})},
+        {"role": "tool", "name": "calc", "content": str(first)},
+        {"role": "assistant", "content": _assistant_json(
+            "Next I will add the requested amount to that result.",
+            tool_call={"name": "calc", "arguments": {"expr": f"{first} + {delta}"}})},
+        {"role": "tool", "name": "calc", "content": str(second)},
+        {"role": "assistant", "content": _assistant_json(
+            "Finally I will multiply the intermediate result.",
+            tool_call={"name": "calc", "arguments": {"expr": f"{second} * {factor}"}})},
+        {"role": "tool", "name": "calc", "content": str(answer)},
+        {"role": "assistant", "content": _assistant_json(
+            "The final calculation is complete.",
+            response=str(answer))},
+    ]
+
+
+def _web_two_stage_math(rng: random.Random) -> list:
+    """Retrieve a numeric web fact, then perform two dependent calculations."""
+    key = rng.choice(["number of planets", "boiling point of water", "freezing point of water"])
+    value = float(_WEB_KB[key].split()[0])
+    delta = rng.randint(1, 20)
+    factor = rng.randint(2, 8)
+    value_text = _number_text(value)
+    first = value + delta
+    first_text = _number_text(first)
+    answer = first * factor
+    answer_text = _number_text(answer)
+    question = f"Look up the {key}, add {delta}, then multiply by {factor}."
+    return [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": _assistant_json(
+            "I need the numeric web fact first.",
+            tool_call={"name": "web_search", "arguments": {"query": key}})},
+        {"role": "tool", "name": "web_search", "content": _WEB_KB[key]},
+        {"role": "assistant", "content": _assistant_json(
+            "I will add the requested amount to the retrieved value.",
+            tool_call={"name": "calc", "arguments": {"expr": f"{value_text} + {delta}"}})},
+        {"role": "tool", "name": "calc", "content": first_text},
+        {"role": "assistant", "content": _assistant_json(
+            "Now I will multiply the intermediate result.",
+            tool_call={"name": "calc", "arguments": {"expr": f"{first_text} * {factor}"}})},
+        {"role": "tool", "name": "calc", "content": answer_text},
+        {"role": "assistant", "content": _assistant_json(
+            "The web-grounded calculation is complete.",
+            response=answer_text)},
+    ]
+
+
+def _cross_source_math(rng: random.Random, memory: dict) -> list:
+    """Combine a numeric memory value and numeric web fact in a final calc."""
+    memory_key = "version"
+    web_key = "number of planets"
+    memory_value = float(memory[memory_key])
+    web_value = float(_WEB_KB[web_key])
+    memory_text = _number_text(memory_value)
+    web_text = _number_text(web_value)
+    factor = rng.randint(2, 10)
+    answer = (memory_value + web_value) * factor
+    answer_text = _number_text(answer)
+    expr = f"({memory_text} + {web_text}) * {factor}"
+    question = (
+        f"Add the stored {memory_key} to the {web_key}, then multiply the "
+        f"result by {factor}."
+    )
+    return [
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": _assistant_json(
+            "First I need the stored numeric value.",
+            tool_call={"name": "search_memory", "arguments": {"key": memory_key}})},
+        {"role": "tool", "name": "search_memory", "content": memory[memory_key]},
+        {"role": "assistant", "content": _assistant_json(
+            "Next I need the numeric web fact.",
+            tool_call={"name": "web_search", "arguments": {"query": web_key}})},
+        {"role": "tool", "name": "web_search", "content": _WEB_KB[web_key]},
+        {"role": "assistant", "content": _assistant_json(
+            "I can now combine both retrieved values.",
+            tool_call={"name": "calc", "arguments": {"expr": expr}})},
+        {"role": "tool", "name": "calc", "content": answer_text},
+        {"role": "assistant", "content": _assistant_json(
+            "The cross-source calculation is complete.",
+            response=answer_text)},
+    ]
+
+
 def _memory_then_math(rng: random.Random, memory: dict) -> list:
-    key = rng.choice(list(memory.keys()))
+    key = "version"
     raw = memory[key]
-    try:
-        base = float(raw)
-    except Exception:
-        base = len(raw)
+    base = float(raw)
     delta = rng.randint(1, 100)
     ans = base + delta
-    expr = f"{base} + {delta}"
+    expr = f"{_number_text(base)} + {delta}"
     templates = [
         f"Add {delta} to the {key}.",
         f"What is the {key} plus {delta}?",
@@ -268,10 +369,10 @@ def _memory_then_math(rng: random.Random, memory: dict) -> list:
         {"role": "assistant", "content": _assistant_json(
             "Then add the requested amount.",
             tool_call={"name": "calc", "arguments": {"expr": expr}})},
-        {"role": "tool", "name": "calc", "content": str(ans)},
+        {"role": "tool", "name": "calc", "content": _number_text(ans)},
         {"role": "assistant", "content": _assistant_json(
             "The final answer is computed.",
-            response=str(ans))},
+            response=_number_text(ans))},
     ]
 
 
@@ -357,8 +458,9 @@ def generate_agent_dataset(num_samples: int = 100000, max_len: int = 512, seed: 
     samples = []
     for _ in range(num_samples):
         kind = rng.choices(
-            ["math", "memory", "date", "web", "web_math", "memory_math", "multi_hop"],
-            weights=[20, 15, 10, 15, 15, 15, 10],
+            ["math", "memory", "date", "web", "web_math", "memory_math", "multi_hop",
+             "two_stage_math", "web_two_stage", "cross_source"],
+            weights=[15, 10, 8, 10, 12, 12, 10, 10, 7, 6],
             k=1,
         )[0]
         if kind == "math":
@@ -373,7 +475,13 @@ def generate_agent_dataset(num_samples: int = 100000, max_len: int = 512, seed: 
             messages = _web_then_math(rng)
         elif kind == "memory_math":
             messages = _memory_then_math(rng, memory)
-        else:
+        elif kind == "multi_hop":
             messages = _multi_hop_question(rng, memory)
+        elif kind == "two_stage_math":
+            messages = _two_stage_math_question(rng)
+        elif kind == "web_two_stage":
+            messages = _web_two_stage_math(rng)
+        else:
+            messages = _cross_source_math(rng, memory)
         samples.append(_truncate(_serialize(messages), max_len=max_len))
     return samples

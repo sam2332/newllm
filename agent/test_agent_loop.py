@@ -12,6 +12,7 @@ from agent.agent_loop import (
     _extract_assistant_json,
     _find_unexecuted_action,
     _find_final_response,
+    _select_final_answer,
 )
 from agent.tools import Toolbox
 
@@ -41,14 +42,14 @@ def test_extract_assistant_json_rejects_invalid_contract(content):
 
 
 def test_inference_context_matches_training_message_format():
-    assert _build_context("What is 12 + 8?", []) == "<user>What is 12 + 8?</user>"
+    assert _build_context("What is 12 + 8?", []) == "<user>What is 12 + 8?</user>\n"
     assert _build_context("What is 12 + 8?", [
         '<assistant>{"thought":"calculate","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>',
         "<tool name=calc>20</tool>",
     ]) == (
         "<user>What is 12 + 8?</user>\n"
         '<assistant>{"thought":"calculate","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>\n'
-        "<tool name=calc>20</tool>"
+        "<tool name=calc>20</tool>\n"
     )
 
 
@@ -63,8 +64,8 @@ def test_find_unexecuted_action_skips_executed():
         '<tool name=calc>2</tool>'
         '<assistant>{"thought":"second","tool_call":{"name":"calc","arguments":{"expr":"2+2"}}}</assistant>'
     )
-    executed = {len(text.split("</assistant>")[0]) + len("</assistant>")}
-    end_pos, parsed, start_pos = _find_unexecuted_action(text, executed)
+    after_first = len(text.split("</assistant>")[0]) + len("</assistant>")
+    end_pos, parsed, start_pos = _find_unexecuted_action(text, after_pos=after_first)
     assert parsed is not None
     assert parsed["tool_call"]["arguments"]["expr"] == "2+2"
 
@@ -77,6 +78,12 @@ def test_find_final_response():
     )
     response, parsed = _find_final_response(text)
     assert response == "2"
+
+
+def test_real_tool_result_is_authoritative_final_answer():
+    steps = [{"tool": "calc", "result": "12.0"}]
+    assert _select_final_answer("1.20", steps) == "12.0"
+    assert _select_final_answer("plain answer", []) == "plain answer"
 
 
 def test_toolbox_json_calc():
@@ -92,6 +99,12 @@ def test_toolbox_json_memory():
 def test_toolbox_json_web_search():
     tb = Toolbox()
     assert tb.run_json({"tool": "web_search", "args": {"query": "capital of france"}}) == "Paris"
+
+
+def test_toolbox_recovers_conservative_near_miss_intent():
+    tb = Toolbox()
+    assert tb.run_json({"tool": "search_mememory", "args": {"key": "lersion"}}) == "0.1"
+    assert tb.run_json({"tool": "web_search", "args": {"query": "capital of frence"}}) == "Paris"
 
 
 def test_toolbox_legacy_web_search():

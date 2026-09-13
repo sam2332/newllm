@@ -24,18 +24,22 @@
 ## In progress
 
 - [x] Persist all sequence MoE experiment results to `results/`
+- [x] Maintain a newest-first leaderboard for saved experiment results
 - [x] Build a tiny ReAct agent with tools (`calc`, `now`, `search_memory`)
 - [x] Add explicit `BEGIN_THINK`/`END_THINK` internal reasoning to the legacy agent traces
 - [x] Add checkpoint saving/loading and a chat/test CLI (`agent/chat.py`)
-- [x] Train agentic transformer to basic tool-usage competence (accuracy > 70%)
+- [x] Train the legacy ReAct agent to basic tool-usage competence (accuracy > 70%)
 - [x] Add curriculum: single-step → multi-step agent traces
 - [x] Persist timestamped snapshots so no experiment is lost
 - [x] Migrate agent tool calls to standard JSON format
 - [x] Add fake `web_search` tool so the LLM must look up facts
 - [x] Replace legacy ReAct traces with JSON message conversations
 - [x] Require every assistant turn to include a `thought` plus either `tool_call` or `response`
+- [x] Apply loss only to assistant messages and use atomic protocol tokens
 - [x] Add a local Ollama/Kimi CoT generator for varied reasoning-data experiments
-- [ ] Train and validate a new checkpoint on the JSON-message protocol
+- [x] Train and validate a JSON arithmetic-specialist checkpoint (5/5 held-out arithmetic)
+- [ ] Train a promotable mixed JSON agent with reliable exact tool selection and multi-step arithmetic
+- [ ] Add an explicit copy/pointer or constrained tool-selection mechanism for JSON agents
 - [ ] Make sequence MoE generate coherent continuations per topic
 - [ ] Train 8K big model to convergence
 - [ ] Add real validation metrics (perplexity, accuracy)

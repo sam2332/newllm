@@ -3,6 +3,36 @@
 > **Rule:** Always update this file after fixing a non-trivial bug or discovering a pitfall.
 > Future agents must read it before making changes to the codebase.
 
+## Assistant-only supervision for tool-use traces
+
+**Mistake:** The initial JSON-agent training used ordinary language-model loss over user messages and real tool observations.
+**Why:** At inference the model only generates assistant messages. Predicting repeated user/tool text lowers loss without improving tool choice, argument grounding, or final responses; it can also teach the model to hallucinate observations.
+**Fix:** `agent/dataset.py` masks loss outside `<assistant>...</assistant>` blocks. `agent/tokenizer.py` adds atomic protocol tokens, giving JSON checkpoints a 271-entry vocabulary. Legacy 256-vocabulary checkpoints are rejected rather than run with incompatible token IDs.
+
+## Atomic tokens require token-aware generation bookkeeping
+
+**Mistake:** After adding atomic protocol tokens, `agent/agent_loop.py` sliced decoded text using a token-count prefix. It also omitted the newline delimiter that separates training messages.
+**Why:** One atomic token can decode to many characters, so a token index is not a character index. Without the training newline after `</user>`, the model began by copying the tail of the user message instead of emitting `<assistant>`.
+**Fix:** The loop tracks generated token IDs separately, decodes only that delta, and serializes every inference message boundary with a newline. The masked math checkpoint then emitted valid JSON and correctly called `calc`.
+
+## Model copies of tool results are not authoritative
+
+**Mistake:** The runtime returned the model's final `response` even after a real tool completed successfully.
+**Why:** The model can make a transcription error after a correct tool call (`12.0` became `1.20`). That turns a correct action into an incorrect user-visible answer.
+**Fix:** `run_agent()` returns the last executed tool result as `final_answer` and retains the JSON string separately as `model_response` for evaluation and debugging.
+
+## Sequential curriculum causes catastrophic skill forgetting
+
+**Mistake:** Fine-tuning the math-capable JSON checkpoint on mixed multi-step traces restored web/memory behavior only by degrading calculator grounding; replaying simple tasks then degraded multi-step arithmetic in the other direction.
+**Evidence:** The curriculum checkpoint reached 100% numeric accuracy but 22.22% exact lookup accuracy. Simple replay improved simple-task behavior but lowered its built-in total to 52.94%. A 50% math-replay curriculum still reached only 35.29% on the corrected combined battery.
+**Rule:** Do not promote the current 25M mixed checkpoints. Keep specialized artifacts in separate directories. Before another full run, either increase capacity, add a copy/pointer mechanism for tool names and arguments, or separate tool selection from free-form thought generation.
+
+## Dataset reweighting alone did not solve the mixed JSON agent
+
+**Mistake:** After observing forgetting, a 50% math replay stream was added to the curriculum and trained from the verified math checkpoint.
+**Evidence:** The balanced 3,000-iteration run produced 71.43% numeric accuracy but 0% exact lookup accuracy and 35.29% on the corrected combined battery. The model still corrupts or changes tool names, queries, and lookup keys before execution.
+**Rule:** Do not spend more S-size GPU runs on sampling weights or replay fractions alone. The next experiment must constrain the tool-name/action grammar, add a copy mechanism for arguments, or increase model capacity.
+
 ## MoE load balancing
 
 **Mistake:** First MoE routed every sequence to expert 3.

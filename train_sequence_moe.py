@@ -90,6 +90,14 @@ def train_sequence_moe(num_experts=4, iters=3000):
 
     result = {
         "num_experts": num_experts,
+        "model_parameters": total,
+        "vocab_size": 256,
+        "max_len": 512,
+        "d_model": 256,
+        "expert_layers": 3,
+        "n_heads": 4,
+        "d_ff": 512,
+        "learning_rate": 1e-3,
         "iters": iters,
         "final_loss": final_loss,
         "best_loss": min(history),

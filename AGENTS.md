@@ -27,6 +27,7 @@ python -m agent.train_agent
 ```
 
 Every run writes a timestamped JSON file to `results/`. Keep these files — they are the permanent record of experiments.
+Saving a result also refreshes [LEADERBOARD.md](LEADERBOARD.md): rows are newest first and ranks are scoped to each experiment family.
 
 Agentic tool-use experiments:
 
@@ -34,34 +35,17 @@ Agentic tool-use experiments:
 # Watch the latest training run
 python watch_agent.py --log agent_run_web_s.log
 
-# Train a fresh S-size agent with JSON + web_search (writes to checkpoints_web/)
-python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume --checkpoint-dir checkpoints_web > agent_run_web_s.log 2>&1
+# Train the validated JSON arithmetic baseline (separate checkpoint directory)
+python -u -m agent.train_agent --samples 20000 --iters 3000 --size S --math-only --no-resume --checkpoint-dir checkpoints_json_math --max-len 768
 
-# Train the same model with a real two-stage curriculum
-#   (single-step foundation, then multi-step + web-math)
-scripts\train_web_agent_s_curriculum.ps1
+# Initialize a mixed JSON run from that math baseline; do not promote its result yet.
+python -u -m agent.train_agent --samples 20000 --iters 3000 --size S --curriculum --no-resume --checkpoint-dir checkpoints_json_candidate --init-checkpoint checkpoints_json_math/agent_best.pt --lr 1e-4 --math-replay-fraction 0.5 --max-len 768
 
-# Same two-stage curriculum but with digit-word expansion for arithmetic
-# copying (experimental, see sidetrack_ideas.md)
-scripts\train_web_agent_s_curriculum_words.ps1
+# Inspect a JSON-specialist checkpoint
+python -m agent.chat --mode chat --checkpoint checkpoints_json_math/agent_best.pt
 
-# Train our current best small agentic model (25M params, curriculum, multi-step)
-python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --curriculum --no-resume > agent_run_best_s.log 2>&1
-
-# Train the larger 151M agentic model (takes ~50 min on RTX 5060 Ti)
-python -u -m agent.train_agent --samples 100000 --iters 10000 --size L --curriculum --no-resume > agent_run_best_l.log 2>&1
-
-# Chat with the best checkpoint
-python -m agent.chat --mode chat
-
-# Chat with the web-search variant
-python -m agent.chat --mode chat --checkpoint checkpoints_web/agent_best.pt
-
-# Run the tool-use test battery
-python -m agent.chat --mode test
-
-# Run the web-search test battery
-python -m agent.chat --mode test --checkpoint checkpoints_web/agent_best.pt
+# Run the new JSON parser, dataset, and tool-use tests
+python -m pytest agent/test_agent_dataset.py agent/test_agent_loop.py -v
 
 # Regression gate: fail promotion if the candidate does not pass thresholds
 # AND win at least 3 out of 5 metric comparisons against the current best.
@@ -70,7 +54,7 @@ python -m agent.promote --dry-run checkpoints_web/agent_best.pt --best checkpoin
 # Promote a passing checkpoint to the workspace best
 python -m agent.promote checkpoints_web/agent_best.pt --best checkpoints/agent_best.pt --min-accuracy 0.85 --min-numeric 0.75 --min-exact 0.85
 
-# PyTest regression suite (base gate used by CI/default tests)
+# Legacy ReAct regression suite. It is not a gate for JSON checkpoints yet.
 python -m pytest agent/test_agent_regression.py -v
 
 # PyTest regression suite including web_search cases
@@ -78,6 +62,9 @@ python -m pytest agent/test_agent_regression.py -v --web
 
 # Unit tests for parsing/tool execution (no model needed)
 python -m pytest agent/test_agent_loop.py -v
+
+# Unit tests for structural tokenization and assistant-only loss masking
+python -m pytest agent/test_agent_dataset.py -v
 ```
 
 ## JSON Agent Protocol (Current)
@@ -102,7 +89,7 @@ Current JSON migration validation:
 
 ```powershell
 python smoke_test.py
-python -m pytest agent/test_agent_loop.py -v
+python -m pytest agent/test_agent_dataset.py agent/test_agent_loop.py -v
 ```
 
 Do not run JSON diagnostic training into `checkpoints/agent_best.pt`. Use a dedicated directory, for example:
@@ -111,13 +98,33 @@ Do not run JSON diagnostic training into `checkpoints/agent_best.pt`. Use a dedi
 python -u -m agent.train_agent --samples 20000 --iters 4000 --size S --math-only --no-resume --checkpoint-dir checkpoints_json --max-len 768
 ```
 
+Verified masked JSON math baseline:
+
+```powershell
+python -u -m agent.train_agent --samples 20000 --iters 3000 --size S --math-only --no-resume --checkpoint-dir checkpoints_json_math --max-len 768
+```
+
+This run reached 5/5 on a held-out arithmetic slice after the JSON inference newline and tool-result fixes. It is math-only; do not use it as a promotion candidate.
+
+The full JSON dataset now mixes single-step work with grounded three-tool chains:
+
+- calculator result -> calculator result -> calculator result;
+- numeric web fact -> two dependent calculations;
+- calculator result -> stored version -> final calculation;
+- stored version -> numeric web fact -> final calculation.
+
+All full traces fit the 768-token agent context. Use `--curriculum` only after a fresh simple JSON checkpoint has been trained.
+
+Training-loop status: the JSON math baseline is validated, but mixed 25M checkpoints trade off exact web/memory retrieval against arithmetic. Do not promote them. The next major experiment should add constrained tool selection or copy support, or increase model capacity.
+
 Read [HANDOFF.md](HANDOFF.md) before continuing the migration.
 
 - Defines `calc`, `now`, `search_memory`, `web_search`, `finish` tools in `agent/tools.py`.
 - Synthetic JSON-message training data lives in `agent/agent_dataset.py`.
+- Structural tokenization and assistant-only SFT masking live in `agent/tokenizer.py` and `agent/dataset.py`.
 - Inference loop with tool execution lives in `agent/agent_loop.py`.
 - Trained model is now expected to emit JSON `thought` + `tool_call`/`response` objects.
-- Best checkpoints are promoted to `checkpoints/agent_best.pt`; old artifacts live in `archive/`.
+- `checkpoints/agent_best.pt` belongs to the legacy ReAct family. JSON candidates remain in their own `checkpoints_json_*` directories until a JSON-specific gate exists.
 - `agent/promote.py` runs a regression gate before promotion. A candidate must pass absolute thresholds AND win at least 3 out of 5 metric comparisons against the current best (`checkpoints/agent_best.pt`). The old best is kept as `*_prev.pt`.
 - `agent/test_agent_regression.py` is the matching PyTest suite.
 - `training/trainer.py` now saves/restores the best-validation-loss checkpoint instead of the final-iteration weights.
