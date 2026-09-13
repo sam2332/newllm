@@ -1,82 +1,191 @@
-# JSON Agent Migration Handoff
+# Handoff
 
-## Objective
+## Environment
 
-Replace the legacy flat ReAct grammar with a consistent message protocol: send a user JSON-message context to the LLM; receive assistant JSON that contains explicit reasoning and either a tool call or final response.
+The server had no PyTorch. The project was developed on Windows against an
+RTX 5060 Ti; this machine is Linux with two GPUs. Rebuilt as:
 
-## Contract
-
-The byte-level model is trained on tagged text representations of messages:
-
-```text
-<user>What is 12 + 8?</user>
-<assistant>{"thought":"I need the calculator.","tool_call":{"name":"calc","arguments":{"expr":"12 + 8"}}}</assistant>
-<tool name=calc>20</tool>
-<assistant>{"thought":"The calculation is complete.","response":"20"}</assistant>
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+.venv/bin/python -m pip install tqdm numpy pytest requests
 ```
 
-Assistant schema:
+Use `.venv/bin/python` for everything. System Python is 3.14 and has no torch
+wheels. Verified: torch 2.11.0+cu128, RTX 4090 (sm_89, 24GB) and RTX 5090
+(sm_120, 32GB), bf16 supported on both.
 
-```json
-{
-  "thought": "required string",
-  "tool_call": {
-    "name": "calc | now | search_memory | web_search | finish",
-    "arguments": {}
-  }
-}
+Two Ollama instances run in Docker on ports 11434 and 11435
+(containers `ollama-4090`, `ollama-3090`). `qwen3:30b-a3b-q8_0` supports tools.
+
+## Architecture
+
+`arch_version` selects the model generation. `arch_version=1` reproduces the
+original code exactly, so old checkpoints still load. `arch_version=2` is the
+default for new models and contains the fixes below.
+
+Defects that were in the original code:
+
+1. `TransformerBlock.forward` was not pre-norm. It did `x = self.norm1(x)` and
+   then `x = x + attn(x)`, overwriting the residual stream rather than leaving
+   it intact. This is the single largest fix.
+2. RoPE was applied once to the token embedding rather than per head to Q and K
+   inside attention, so positional signal was largely destroyed by the first
+   normalization. Exact span copying is a positional task, which is why tool
+   arguments could not be copied reliably.
+3. `_init_weights` branched on `isinstance(p, nn.Linear)` while iterating
+   `named_parameters()`, where `p` is a Tensor. Those branches never ran, so
+   depth-scaled residual init was never applied.
+4. Inference re-ran a full forward pass over the whole sequence per token and
+   re-parsed the entire string each step.
+5. Training used fp16 + GradScaler although both GPUs support bf16 natively.
+
+Also added: RMSNorm, QK-Norm, SwiGLU, GQA, fused SDPA, KV cache, z-loss,
+decoupled weight decay, AdamW betas (0.9, 0.95).
+
+Run `.venv/bin/python scripts/debug_arch.py` to re-verify causality, KV-cache
+equivalence, RoPE relative behaviour, gradient health and throughput.
+
+## Results
+
+Battery: `.venv/bin/python scripts/eval_agent.py <checkpoint> -v`
+
+| model                              | overall | numeric | 2-hop | 3-hop | JSON |
+|------------------------------------|---------|---------|-------|-------|------|
+| v1 original, S, single-step data    | 47.1%   | 0%      | 0%    | 0%    | 85.7% |
+| v2, S, single-step data             | 64.7%   | 43%     | 0%    | 0%    | 100%  |
+| v2, M (74.8M), mixed data           | 88.2%   | 100%    | 100%  | 100%  | 100%  |
+
+`checkpoints_v2_M/agent_best.pt` is the current best instruct checkpoint at
+88.2% (15/17). It chains three tools correctly, e.g.
+`search_memory -> web_search -> calc`.
+
+This **supersedes the previous conclusion** recorded in `progress.md` that the
+model "cannot reliably retain exact web/memory tool arguments and multi-step
+arithmetic together" and that dataset work should stop. That conclusion was
+reached against the defective architecture. With the fixes, multi-hop accuracy
+went from 0% to 100% on the same synthetic distribution.
+
+Remaining failures are both routing, on phrasings absent from the old templates:
+
+- "Who is the president of the united states?" - emits no tool call
+- "How many planets are there?" - routes to `search_memory`, returns `cavepeople`
+
+## Data
+
+The old generator was the real ceiling: 4000 traces contained 34 distinct
+`thought` strings, 12 web facts and 7 memory keys. Validation loss reaches
+0.0000 because the model memorizes 34 sentences.
+
+`scripts/gen_data_ollama.py` drives both Ollama instances to produce language
+diversity. Current pool (`data/ollama_pool.json`): 1212 thoughts across 16
+situations, 175 paraphrases, 682 facts (171 numeric, usable for chains).
+
+**The teacher never produces a tool result.** It supplies phrasings, reasoning
+sentences and factual key/value pairs only. Every observation in every emitted
+trace comes from the real `Toolbox` and is verified. A spot check of 559
+observations found 0 mismatches. Preserve this invariant: if a teacher is ever
+allowed to state what a tool returned, the dataset stops being ground truth.
+
+`agent/rich_dataset.py` composes traces from the pool. Repo-tool outputs are
+memoized during generation (3000 traces/s).
+
+## Instruct / chat split
+
+Two models, one architecture:
+
+```bash
+.venv/bin/python scripts/train_split.py --mode instruct --size M   # max_len 768
+.venv/bin/python scripts/train_split.py --mode chat --size M       # max_len 2048
 ```
 
-or:
+`--init-checkpoint` warm-starts one from the other and grows embedding rows
+rather than refusing a smaller-vocabulary checkpoint.
 
-```json
-{
-  "thought": "required string",
-  "response": "final answer"
-}
+EOT semantics changed. It previously appeared once per trace, at the very end,
+so the model learned end-of-episode and never end-of-turn; in conversation it
+would run past its own answer and write the user's next message. Every
+assistant turn emitting a final response now ends with a supervised EOT.
+
+The tokenizer grew 271 -> 273 (`<system>`, `</system>`). The extension is
+append-only: ids 0-270 keep their meaning.
+
+Evaluate chat with `scripts/eval_chat.py`, which scores coreference, ellipsis,
+back-reference, topic switch and no-tool-needed separately.
+
+## Tools
+
+The model routes across 11 tools.
+
+- `agent/tools.py` - `calc`, `now`, `search_memory`, `web_search`, `finish`.
+  `Toolbox(memory=..., web_kb=...)` now accepts injected data.
+- `agent/repo_tools.py` - read-only self-inspection: `list_files`, `read_file`,
+  `search_code`, `describe_symbol`, `repo_stats`. Confined to the repo root;
+  `..` and absolute paths rejected.
+- `agent/sandbox_tools.py` - `run_bash`, `run_python` in a throwaway Docker
+  container: `--network none`, `--read-only`, tmpfs /tmp, 512MB, 1 CPU, 128
+  pids, all capabilities dropped, `no-new-privileges`, uid 65534, wall-clock
+  timeout. Verified unable to reach the host Ollama, resolve DNS, or see the
+  repo; fork bomb contained; 2GB allocation OOM-killed.
+
+**Keep introspection and execution separate.** `repo_tools` reads code but runs
+nothing; `sandbox_tools` runs code but cannot see the repo. Merging them would
+let a confused model read a host path and act on it.
+
+`scripts/gen_sandbox_pool.py` runs a task list once in real containers and keeps
+only what succeeds, so dataset generation never starts a container.
+
+## Ollama compatibility
+
+`agent/ollama_format.py`, verified against a live instance. Two deviations from
+a naive OpenAI assumption:
+
+- `tool_calls` is a list of `{"id", "function": {"index", "name", "arguments"}}`
+- `function.arguments` is a real JSON object, not a JSON-encoded string
+
+Tool results return as `{"role": "tool", "tool_name": ..., "content": ...}`.
+The internal protocol stays compact because a byte-level model pays per
+character; `thought` maps to Ollama's `thinking` field.
+
+## Constrained decoding
+
+`agent/constrained.py` masks logits to the assistant-JSON grammar, making
+invalid JSON and non-existent tool names unrepresentable. Enable with
+`run_agent(..., constrained=True)`.
+
+It does not currently improve accuracy, because `arch_version=2` already emits
+100% valid JSON greedily. It is a guarantee, not a quality gain. It will matter
+for smaller models, higher temperatures, or a larger tool set.
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest agent/test_agent_dataset.py agent/test_agent_loop.py -q
+.venv/bin/python smoke_test.py
+.venv/bin/python test_modern_features.py
 ```
 
-`thought` is required. `tool_call` and `response` are mutually exclusive.
+27 passed; smoke and modern-feature tests pass.
 
-## Changed Files
+`agent/test_agent_regression.py` has 5 errors. **Pre-existing**, not caused by
+these changes: it points at `checkpoints/agent_best.pt`, the legacy
+256-vocabulary checkpoint. Re-baseline it against `checkpoints_v2_M/` or the
+newer instruct checkpoint, keeping the 3-of-5 competition gate.
 
-- `agent/agent_dataset.py`: synthetic tagged JSON-message traces; raw digits are retained.
-- `agent/agent_loop.py`: parser/executor for assistant JSON messages and tool-result injection.
-- `agent/train_agent.py`: uses the new dataset interface; old compact-math option removed.
-- `agent/chat.py`: displays JSON-loop results.
-- `agent/test_agent_loop.py`: parser and toolbox unit coverage for the new protocol.
-- `agent/ollama_cot.py`: optional Kimi/Ollama CoT-data generator.
+## Next
 
-## Verified
+1. Re-baseline `test_agent_regression.py` and `agent/promote.py` against a
+   current checkpoint. This is the main piece of unfinished work.
+2. Train and evaluate the chat model; `scripts/eval_chat.py` is ready.
+3. The two routing failures should be re-checked after training on the diverse
+   pool - both look like template-coverage gaps rather than model limits.
+4. Generation is bound by Python and kernel-launch overhead at this size, not
+   compute. If decode speed matters, CUDA graphs or `torch.compile` on the
+   single-token step is the lever; the KV cache alone does not help here.
 
-- `python smoke_test.py`: passed.
-- `python -m pytest agent/test_agent_loop.py -v`: passed, 9 tests.
-- Synthetic single-step math traces are about 268 bytes; full multi-hop traces can reach 702 bytes. The JSON agent therefore defaults to a 768-token byte context.
+## Scale expectations
 
-## Current State and Blockers
-
-1. The JSON protocol is not backward compatible with legacy ReAct checkpoints.
-2. A quick JSON training diagnostic had low character-level loss but 0% task accuracy and no parsed final answers.
-3. That diagnostic overwrote `checkpoints/agent_best.pt`; do not treat it as the best model or promote it.
-4. The old regression/promotion expectations are for the previous agent family. Re-baseline them only after a viable JSON checkpoint exists.
-5. Training serialization and inference serialization must be identical. Confirm that the system prompt, role tags, newlines, and tool tags match before spending GPU time.
-
-## Recommended Continuation
-
-1. Preserve or recover the prior legacy checkpoint as an archived artifact; do not run it through the JSON loop.
-2. Make one shared message serializer used by both `agent/agent_dataset.py` and `agent/agent_loop.py` so training and inference prompts cannot drift.
-3. Add unit tests that compare a generated training prefix with the inference context for the same question and tool result.
-4. Train a fresh JSON checkpoint in `checkpoints_json/`, never the default best path.
-5. Begin with a narrow math-only JSON dataset. Evaluate parsed JSON validity, tool-call rate, expression-copy accuracy, and numerical correctness separately.
-6. Only then mix in memory, date, web, and multi-hop traces.
-7. Update `agent/test_agent_regression.py` and `agent/promote.py` to use the JSON checkpoint path and a fresh baseline. Keep the 3-of-5 competition gate.
-
-## Ollama CoT Data
-
-Start Ollama with access to the requested Kimi cloud model, then run:
-
-```powershell
-python -m agent.ollama_cot --samples 100 --model kimi2.7-cloud --output agent/cot_data.json
-```
-
-This produces a JSON file with question, expected answer, task kind, and generated CoT. It is not yet mixed into the training dataset; validate its quality and decide how to serialize it before adding it to training.
+This is a 25-75M parameter byte-level model. The architecture and data pipeline
+are now sound and the numbers above are real, but frontier-model behaviour is
+several orders of magnitude away in both parameters and training tokens. Judge
+changes against the battery and the chat eval, not against general capability.
