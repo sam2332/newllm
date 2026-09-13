@@ -28,7 +28,8 @@ class Trainer:
                  num_workers: int = 4,
                  checkpoint_path: str = None,
                  save_every: int = 0,
-                 resume: bool = False):
+                 resume: bool = False,
+                 ddp: bool = False):
         if device is None:
             device = get_best_device()
         self.model = model.to(device)
@@ -76,13 +77,26 @@ class Trainer:
         loader_kw = dict(num_workers=num_workers, pin_memory=True,
                          persistent_workers=num_workers > 0,
                          drop_last=True) if num_workers > 0 else {}
-        self.loader = DataLoader(dataset, batch_size=batch_size,
-                                 shuffle=True, collate_fn=collator, **loader_kw)
+        self.sampler = None
+        if ddp:
+            from torch.utils.data.distributed import DistributedSampler
+            # Each rank sees a disjoint shard, so the effective batch is
+            # batch_size * grad_accum * world_size.
+            self.sampler = DistributedSampler(dataset, shuffle=True,
+                                              drop_last=True)
+            self.loader = DataLoader(dataset, batch_size=batch_size,
+                                     sampler=self.sampler,
+                                     collate_fn=collator, **loader_kw)
+        else:
+            self.loader = DataLoader(dataset, batch_size=batch_size,
+                                     shuffle=True, collate_fn=collator,
+                                     **loader_kw)
         if val_dataset is not None:
             self.val_loader = DataLoader(val_dataset, batch_size=batch_size,
                                          shuffle=False, collate_fn=collator)
         else:
             self.val_loader = None
+        self.ddp = ddp
         self.checkpoint_path = checkpoint_path
         self.save_every = save_every
         self.start_step = 0
@@ -119,6 +133,9 @@ class Trainer:
         print(f"resumed from step {self.start_step} "
               f"(best_val={self.best_val_loss:.4f})")
 
+    def _unwrapped(self):
+        return getattr(self.model, "module", self.model)
+
     def _save_resume_state(self, step: int):
         """Atomically write resume state so a crash cannot corrupt it.
 
@@ -142,8 +159,8 @@ class Trainer:
             "best_val_step": self.best_val_step,
             "best_loss": self.best_loss,
             "best_model_state": self._best_model_state,
-            "config": self.model._get_config()
-            if hasattr(self.model, "_get_config") else {},
+            "config": self._unwrapped()._get_config()
+            if hasattr(self._unwrapped(), "_get_config") else {},
         }, tmp)
         os.replace(tmp, target)
 
@@ -235,6 +252,9 @@ class Trainer:
             try:
                 x, y, mask = next(data_iter)
             except StopIteration:
+                if self.sampler is not None:
+                    # Reshuffle differently each epoch across ranks.
+                    self.sampler.set_epoch(step)
                 data_iter = iter(self.loader)
                 x, y, mask = next(data_iter)
             loss = self.train_step(x, y, mask, step)

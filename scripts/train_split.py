@@ -20,6 +20,8 @@ import time
 
 sys.path.insert(0, "/home/lmeadows/llm")
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import random_split
 
 from agent.dataset import AgentDataset
@@ -40,16 +42,27 @@ PRESETS = {
 DEFAULT_MAX_LEN = {"instruct": 1024, "chat": 2048}
 
 
-def build_traces(mode, pool_path, samples, max_len, seed):
+def build_traces(mode, pool_path, samples, max_len, seed,
+                 deep_fraction=0.0, deep_min=4, deep_max=12, quiet=False):
     """Prefer the generated diversity pool; fall back to the built-ins."""
     if pool_path and os.path.exists(pool_path):
         from agent.rich_dataset import load_pool, generate
         pool = load_pool(pool_path)
         traces, stats = generate(pool, samples, mode=mode,
-                                 max_len=max_len, seed=seed)
-        print(f"source: ollama pool {pool_path}")
-        print(f"  facts={stats['facts']} numeric_facts={stats['numeric_facts']} "
-              f"dropped={stats['dropped_invalid']} too_long={stats['too_long']}")
+                                 max_len=max_len, seed=seed,
+                                 deep_fraction=deep_fraction,
+                                 deep_min=deep_min, deep_max=deep_max)
+        if not quiet:
+            print(f"source: ollama pool {pool_path}")
+            print(f"  facts={stats['facts']} numeric={stats['numeric_facts']} "
+                  f"too_long={stats['too_long']} "
+                  f"ungrounded_rejected={stats['ungrounded_rejected']}")
+            if deep_fraction:
+                import collections
+                hops = collections.Counter(t.count('"tool_call"') for t in traces)
+                deep = sum(v for k, v in hops.items() if k >= 10)
+                print(f"  deep chains: max {max(hops)} hops, "
+                      f"{deep} traces with >=10 hops")
         return traces
     print(f"source: built-in generator (no pool at {pool_path})")
     if mode == "chat":
@@ -74,6 +87,13 @@ def main():
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--deep-fraction", type=float, default=0.0,
+                    help="fraction of traces that are deep N-hop chains")
+    ap.add_argument("--deep-min", type=int, default=4)
+    ap.add_argument("--deep-max", type=int, default=12)
+    ap.add_argument("--grad-checkpoint", action="store_true",
+                    help="recompute activations in backward; ~30%% slower, "
+                         "needed for long context")
     ap.add_argument("--save-every", type=int, default=250,
                     help="write resumable state every N iterations (0 = off)")
     ap.add_argument("--resume", action="store_true",
@@ -83,30 +103,53 @@ def main():
                          "from the finished instruct model)")
     args = ap.parse_args()
 
+    # torchrun sets these; absent means single-GPU.
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    ddp = local_rank >= 0 and world_size > 1
+    if ddp:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
+        device = f"cuda:{local_rank}"
+    else:
+        device = get_best_device()
+    is_main = (not ddp) or dist.get_rank() == 0
+
     max_len = args.max_len or DEFAULT_MAX_LEN[args.mode]
     out_dir = args.out or f"checkpoints_{args.mode}_{args.size}"
-    os.makedirs(out_dir, exist_ok=True)
-    device = get_best_device()
+    if is_main:
+        os.makedirs(out_dir, exist_ok=True)
     torch.manual_seed(args.seed)
 
-    print(f"=== training {args.mode} model ({args.size}) on {device} ===")
-    traces = build_traces(args.mode, args.pool, args.samples, max_len, args.seed)
+    if is_main:
+        print(f"=== training {args.mode} model ({args.size}) on {device} ===")
+        if ddp:
+            print(f"    DDP across {world_size} GPUs "
+                  f"(effective batch x{world_size})")
+    traces = build_traces(args.mode, args.pool, args.samples, max_len, args.seed,
+                          deep_fraction=args.deep_fraction,
+                          deep_min=args.deep_min, deep_max=args.deep_max,
+                          quiet=not is_main)
     ds = AgentDataset(traces, max_len=max_len, tokenizer=TOK)
     val_n = max(1, int(len(ds) * 0.05))
     train_set, val_set = random_split(
         ds, [len(ds) - val_n, val_n],
         generator=torch.Generator().manual_seed(args.seed))
-    print(f"dataset: {len(train_set)} train / {len(val_set)} val, "
-          f"max_len={max_len}")
+    if is_main:
+        print(f"dataset: {len(train_set)} train / {len(val_set)} val, "
+              f"max_len={max_len}")
 
     cfg = PRESETS[args.size]
     model = Transformer(vocab_size=TOK.vocab_size, max_len=max_len,
                         dropout=0.1, use_rope=True, tie_weights=False,
                         arch_version=2,
                         n_kv_heads=max(1, cfg["n_heads"] // 4),
-                        qk_norm=True, **cfg)
-    print(f"model: {model.count_parameters():,} parameters, "
-          f"vocab={TOK.vocab_size}")
+                        qk_norm=True,
+                        grad_checkpoint=args.grad_checkpoint, **cfg)
+    if is_main:
+        print(f"model: {model.count_parameters():,} parameters, "
+              f"vocab={TOK.vocab_size}, "
+              f"grad_checkpoint={args.grad_checkpoint}")
 
     if args.init_checkpoint:
         ck = torch.load(args.init_checkpoint, map_location="cpu",
@@ -134,14 +177,19 @@ def main():
               f"{loaded} tensors loaded, {grown} grown, {skipped} skipped")
 
     path = os.path.join(out_dir, "agent_best.pt")
+    if ddp:
+        model = model.to(device)
+        model = DistributedDataParallel(model, device_ids=[local_rank],
+                                        find_unused_parameters=False)
     trainer = Trainer(model, train_set, batch_size=args.batch_size, lr=args.lr,
                       max_iters=args.iters, device=device, val_dataset=val_set,
                       grad_accum_steps=args.grad_accum,
                       warmup_steps=max(50, args.iters // 20),
                       use_amp=True, amp_dtype="bf16", z_loss=1e-4,
                       weight_decay=0.1, betas=(0.9, 0.95), num_workers=4,
-                      checkpoint_path=path, save_every=args.save_every,
-                      resume=args.resume)
+                      checkpoint_path=path if is_main else None,
+                      save_every=args.save_every if is_main else 0,
+                      resume=args.resume, ddp=ddp)
     print(f"batch={args.batch_size} x {args.grad_accum} "
           f"(effective {args.batch_size * args.grad_accum}) lr={args.lr}")
 
@@ -149,13 +197,25 @@ def main():
     hist = trainer.train()
     dt = time.time() - t0
 
-    model.save(path)
+    if ddp:
+        dist.barrier()
+    if not is_main:
+        dist.destroy_process_group()
+        return
+    # Unwrap DDP before saving so the checkpoint has plain parameter names.
+    to_save = model.module if isinstance(model, DistributedDataParallel) else model
+    to_save.save(path)
     # The run completed, so the resume state is no longer needed.
     resume_file = path + ".resume"
     if os.path.exists(resume_file):
         os.remove(resume_file)
     meta = {
-        "mode": args.mode, "size": args.size, "params": model.count_parameters(),
+        "mode": args.mode, "size": args.size,
+        "params": to_save.count_parameters(),
+        "deep_fraction": args.deep_fraction,
+        "deep_range": [args.deep_min, args.deep_max],
+        "grad_checkpoint": args.grad_checkpoint,
+        "world_size": world_size,
         "max_len": max_len, "samples": args.samples, "iters": args.iters,
         "lr": args.lr, "seed": args.seed,
         "effective_batch": args.batch_size * args.grad_accum,
@@ -169,6 +229,8 @@ def main():
           f"train_last50={meta['final_train_loss']:.4f} "
           f"time={dt/60:.1f}min")
     print(f"saved -> {path}")
+    if ddp:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
