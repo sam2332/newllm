@@ -26,6 +26,7 @@ discrimination the model actually has to learn.
 """
 
 import json
+import os
 import random
 
 from agent.chat_dataset import serialize_chat
@@ -68,6 +69,20 @@ ASK_FILE_PHRASINGS = [
 LIST_PHRASINGS = ["What files have we got?", "List the workspace.",
                   "Show me what's been saved so far."]
 RUN_PHRASINGS = ["How do I run it?", "What's the command to run this?"]
+
+
+def load_items(spec):
+    """Load the knowledge library from one path or a comma-separated list.
+
+    Two teacher processes (one per GPU) write separate files rather than
+    fighting over one, so the normal case is more than one path.
+    """
+    items = []
+    for path in str(spec or "").split(","):
+        path = path.strip()
+        if path and os.path.exists(path):
+            items.extend(json.load(open(path)))
+    return items
 
 
 def _aj(thought, response=None, tool_call=None):

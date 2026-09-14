@@ -60,7 +60,9 @@ def main():
     ap.add_argument("--knowledge-fraction", type=float, default=0.0,
                     help="fraction of traces drawn from the knowledge library "
                          "(python, bash, science, coding principles)")
-    ap.add_argument("--knowledge", default="data/knowledge.json")
+    ap.add_argument("--knowledge",
+                    default="data/knowledge.json,data/knowledge_b.json",
+                    help="one path or a comma-separated list")
     ap.add_argument("--knowledge-explain-fraction", type=float, default=0.5,
                     help="of the knowledge slice, the share that is pure Q&A "
                          "with no tool call; the rest are workspace code arcs")

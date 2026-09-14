@@ -266,11 +266,14 @@ def main():
                          "say nothing about which GPU serves a model.")
     ap.add_argument("--endpoints", type=int, default=len(ENDPOINTS))
     ap.add_argument("--save-every", type=int, default=5)
+    ap.add_argument("--seed", type=int, default=0,
+                    help="job ordering; two instances with different seeds on "
+                         "different endpoints keep both GPUs busy")
     args = ap.parse_args()
 
     endpoints = args.endpoint or ENDPOINTS[:max(1, args.endpoints)]
     partial = args.out.replace(".json", ".partial.json")
-    rng = random.Random(0)
+    rng = random.Random(args.seed)
     t0 = time.time()
 
     # Resume: a power cut costs at most --save-every requests.

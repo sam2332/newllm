@@ -101,10 +101,10 @@ def _worker(args):
     knowledge_fraction = extras.get("knowledge_fraction", 0.0)
     knowledge_path = extras.get("knowledge")
     n_knowledge_direct = 0
-    if knowledge_fraction and knowledge_path and os.path.exists(knowledge_path):
-        from agent.knowledge_traces import generate_knowledge_traces
-        kitems = json.load(open(knowledge_path))
-        want = int(n * knowledge_fraction)
+    if knowledge_fraction and knowledge_path:
+        from agent.knowledge_traces import generate_knowledge_traces, load_items
+        kitems = load_items(knowledge_path)
+        want = int(n * knowledge_fraction) if kitems else 0
         ef = extras.get("knowledge_explain_fraction", 0.5)
         got = generate_knowledge_traces(
             kitems, want, seed=shard_seed + 23, explain_fraction=ef,

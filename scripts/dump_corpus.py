@@ -43,7 +43,8 @@ def main():
     # Source code and technical prose compress very differently from JSON
     # tool traces; leaving them out of the tokenizer corpus wastes merges.
     ap.add_argument("--knowledge-fraction", type=float, default=0.2)
-    ap.add_argument("--knowledge", default="data/knowledge.json")
+    ap.add_argument("--knowledge",
+                    default="data/knowledge.json,data/knowledge_b.json")
     ap.add_argument("--persona-fraction", type=float, default=0.2)
     ap.add_argument("--personas", default="data/personas.json")
     ap.add_argument("--format-fraction", type=float, default=0.15)
@@ -63,9 +64,9 @@ def main():
         print(f"  {len(traces):,} long project arcs from {len(stories)} stories")
 
     n_know = int(args.samples * args.knowledge_fraction)
-    if n_know and os.path.exists(args.knowledge):
-        from agent.knowledge_traces import generate_knowledge_traces
-        kitems = json.load(open(args.knowledge))
+    from agent.knowledge_traces import generate_knowledge_traces, load_items
+    kitems = load_items(args.knowledge) if n_know else []
+    if kitems:
         traces.extend(generate_knowledge_traces(kitems, n_know, seed=args.seed))
         print(f"  {n_know:,} knowledge traces from {len(kitems):,} items")
 
