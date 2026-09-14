@@ -2,7 +2,11 @@
 *.pyc
 __pycache__/
 .venv/
-archive/
+# Exclude the CONTENTS, not the directory itself: git cannot re-include a file
+# whose parent directory is excluded, so "archive/" would make the negation
+# below silently do nothing.
+archive/*
+!archive/notes/
 
 # Checkpoints are hundreds of MB each; keep them out of git.
 checkpoints*/

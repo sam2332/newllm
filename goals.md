@@ -1,54 +1,77 @@
-# Project Goals
+# Project goals
 
-## Current goals
+Updated 2026-09-14. Historical goal lists are in
+[archive/notes/](archive/notes/); most of the original list (build a transformer
+from scratch, modern feature modules, sampling, MoE routing, an 8K-context run
+on an RTX 5060 Ti) is done or superseded by the current machine.
 
-1. Build a minimal but correct transformer from scratch in PyTorch.
-2. Implement modern LLM ideas: MLA, sparse attention, MoE, RoPE, SSM, hybrid layers, multi-token prediction, reasoning-time compute.
-3. Add a working training + evaluation pipeline with synthetic data.
-4. Scale to 8K token context on an RTX 5060 Ti.
-5. Make sequence-level Mixture-of-Experts actually route to different "mini-minds" per story type.
-6. Provide modern sampling (temperature, top-k, top-p, min-p, repetition penalty).
+## The goal
 
-## Completed
+**The smallest model that can accurately do tools and chat, with some roleplay,
+usable from Ollama.**
 
-- [x] Transformer from scratch
-- [x] Modular file structure under `model/`
-- [x] Modern feature modules (MLA, sparse, MoE, SSM, multi-token, RoPE, reasoning)
-- [x] Smoke + feature tests
-- [x] Basic training pipeline on sample stories
-- [x] Big dataset + larger-context training scripts
-- [x] CUDA 12.8 GPU setup for RTX 5060 Ti
-- [x] Sampler with temperature/top-k/top-p/min-p/repetition penalty
-- [x] Sequence-level MoE with load-balancing loss
+Four things have to be true at once, and only the first has been measured.
 
-## In progress
+### 1. Tools - partly there
 
-- [x] Persist all sequence MoE experiment results to `results/`
-- [x] Maintain a newest-first leaderboard for saved experiment results
-- [x] Build a tiny ReAct agent with tools (`calc`, `now`, `search_memory`)
-- [x] Add explicit `BEGIN_THINK`/`END_THINK` internal reasoning to the legacy agent traces
-- [x] Add checkpoint saving/loading and a chat/test CLI (`agent/chat.py`)
-- [x] Train the legacy ReAct agent to basic tool-usage competence (accuracy > 70%)
-- [x] Add curriculum: single-step → multi-step agent traces
-- [x] Persist timestamped snapshots so no experiment is lost
-- [x] Migrate agent tool calls to standard JSON format
-- [x] Add fake `web_search` tool so the LLM must look up facts
-- [x] Replace legacy ReAct traces with JSON message conversations
-- [x] Require every assistant turn to include a `thought` plus either `tool_call` or `response`
-- [x] Apply loss only to assistant messages and use atomic protocol tokens
-- [x] Add a local Ollama/Kimi CoT generator for varied reasoning-data experiments
-- [x] Train and validate a JSON arithmetic-specialist checkpoint (5/5 held-out arithmetic)
-- [ ] Train a promotable mixed JSON agent with reliable exact tool selection and multi-step arithmetic
-- [ ] Add an explicit copy/pointer or constrained tool-selection mechanism for JSON agents
-- [ ] Make sequence MoE generate coherent continuations per topic
-- [ ] Train 8K big model to convergence
-- [ ] Add real validation metrics (perplexity, accuracy)
-- [ ] Scale agent model toward 1B params with MoE/MLA/sparse attention
+Read tool schemas from context and call them correctly, including tools never
+seen in training.
 
-## Future goals
+- now: **35/100** on held-out traces
+- blocker: chains of 4+ calls score **4/49**, and that is half the distribution
+- the failure is grounding on the *first* call, not depth
 
-- [ ] Add KV-cache inference
-- [ ] Quantization / 4-bit training support
-- [ ] Load real text corpus
-- [ ] Distributed training across multiple GPUs
-- [ ] Export model to safetensors / ONNX
+### 2. Chat - not started
+
+Multi-turn conversation: coreference, ellipsis, back-reference, topic switch, and
+knowing when no tool is needed. Yield to the user at end of turn instead of
+writing their next message.
+
+`scripts/eval_chat.py` scores all five separately and has never been run against
+a trained model. `train_split.py --mode chat` works. This is the largest
+unmeasured gap.
+
+### 3. Roleplay - not started
+
+No data, no eval, no format decision. Needs a judgement on tokenizer first: at
+byte level a 3,000-token reply is ~484 words, which is probably not what
+"roleplay" means here.
+
+### 4. Small - never tested
+
+Every number in this project is the **M** preset (74.8M). S is 22.8M. The
+question "what is the smallest model that can do this" has not been asked once.
+A run is 89 minutes, so this is cheap to answer.
+
+## Constraints that shape the work
+
+- **Ollama-usable.** A proxy is acceptable (`serve_ollama_compat.py` already
+  works), so native GGUF is a stretch goal rather than a requirement. This is why
+  the tokenizer is still an open decision instead of a forced one.
+- **Responses up to ~3,000 tokens.** Current generation caps are 120-400.
+- **A write-file tool is wanted.** It must not be bolted onto `repo_tools`;
+  read-the-repo and write-files stay separate capabilities.
+- **One GPU at a time.** Dual-GPU load browns the machine out.
+- **The teacher never produces a tool result.** Every observation comes from the
+  real toolbox. This is what makes the dataset ground truth.
+
+## Done
+
+- Transformer from scratch, modular under `model/`
+- `arch_version=2`: pre-norm, per-head RoPE, working init, KV cache, bf16
+- Modern modules: MLA, sparse attention, MoE, SSM, multi-token, reasoning-time
+- Sampling: temperature, top-k, top-p, min-p, repetition penalty
+- JSON tool protocol with assistant-only loss masking
+- Tool schemas in context with randomized names, so tools are read not memorized
+- 11 tools across three isolation levels (plain, read-only repo, sandboxed exec)
+- Ollama-teacher data generation that never fabricates tool results
+- Parallel cached dataset build (3,000 traces/s)
+- Held-out evaluation that reflects the training distribution
+- Reproducible run scripts and a preflight check
+- Diagnosed and survived the power/stability problems that were killing runs
+
+## Not doing
+
+- Competing with frontier models. This is 25-75M parameters.
+- Training on data whose tool outputs were written by a teacher.
+- Two-GPU training, until the power situation is properly understood.
