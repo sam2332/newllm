@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -196,12 +197,33 @@ Each item:
 JSON only, no markdown."""
 
 
-def gen_explain(model, domain, topic, n, endpoint):
+# Cloud endpoints do not enforce the `format` schema the way the local ones
+# do: gpt-oss:120b-cloud returns a bare array as often as {"items": [...]},
+# and emits invalid JSON escapes (a literal \d inside a regex in a string).
+# Both are recoverable, and discarding a whole six-item batch over one stray
+# backslash is how the persona run lost hours.
+_BAD_ESCAPE = re.compile(r'\\(?![nrtbf"/\\u])')
+
+
+def parse_items(text: str) -> list:
+    """The item list from a teacher reply, tolerating both shapes."""
+    for attempt in (text, _BAD_ESCAPE.sub(r"\\\\", text)):
+        try:
+            obj = json.loads(attempt)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            obj = obj.get("items") or obj.get("stories") or []
+        return obj if isinstance(obj, list) else []
+    raise json.JSONDecodeError("unparseable teacher reply", text, 0)
+
+
+def gen_explain(model, domain, topic, n, endpoint, think=False):
     text = ollama_chat(EXPLAIN_PROMPT.format(n=n, topic=topic, domain=domain),
                        model, endpoint, temperature=0.9, timeout=900,
-                       num_predict=max(4096, 900 * n), fmt=SCHEMA)
+                       num_predict=max(4096, 900 * n), fmt=SCHEMA, think=think)
     out = []
-    for it in (json.loads(text).get("items") or []):
+    for it in parse_items(text):
         if not isinstance(it, dict):
             continue
         q, a = (it.get("question") or "").strip(), (it.get("answer") or "").strip()
@@ -217,13 +239,13 @@ def gen_explain(model, domain, topic, n, endpoint):
     return out
 
 
-def gen_artifact(model, domain, lang, ext, topic, n, lo, hi, endpoint):
+def gen_artifact(model, domain, lang, ext, topic, n, lo, hi, endpoint, think=False):
     text = ollama_chat(ARTIFACT_PROMPT.format(n=n, lang=lang, ext=ext, topic=topic,
                                               lo=lo, hi=hi),
                        model, endpoint, temperature=0.9, timeout=1200,
-                       num_predict=max(6144, 1800 * n), fmt=ARTIFACT_SCHEMA)
+                       num_predict=max(6144, 1800 * n), fmt=ARTIFACT_SCHEMA, think=think)
     out = []
-    for it in (json.loads(text).get("items") or []):
+    for it in parse_items(text):
         if not isinstance(it, dict):
             continue
         code = (it.get("code") or "").strip()
@@ -266,12 +288,15 @@ def main():
                          "say nothing about which GPU serves a model.")
     ap.add_argument("--endpoints", type=int, default=len(ENDPOINTS))
     ap.add_argument("--save-every", type=int, default=5)
+    ap.add_argument("--think", default="false",
+                    help="reasoning effort: false, low, medium, high. gpt-oss reasons even at false, so 'low' is the cheap setting for it")
     ap.add_argument("--seed", type=int, default=0,
                     help="job ordering; two instances with different seeds on "
                          "different endpoints keep both GPUs busy")
     args = ap.parse_args()
 
     endpoints = args.endpoint or ENDPOINTS[:max(1, args.endpoints)]
+    think = False if str(args.think).lower() in ("false", "0", "no") else args.think
     partial = args.out.replace(".json", ".partial.json")
     rng = random.Random(args.seed)
     t0 = time.time()
@@ -319,10 +344,11 @@ def main():
             ep = endpoints[i % len(endpoints)]
             if kind == "artifact":
                 f = ex.submit(gen_artifact, args.model, dom, lang, ext, topic,
-                              args.per_request, args.min_chars, args.max_chars, ep)
+                              args.per_request, args.min_chars, args.max_chars, ep,
+                              think)
             else:
                 f = ex.submit(gen_explain, args.model, dom, topic,
-                              args.per_request, ep)
+                              args.per_request, ep, think)
             futs[f] = (dom, topic, kind)
         for k, f in enumerate(as_completed(futs), 1):
             dom, topic, kind = futs[f]

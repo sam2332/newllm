@@ -10,6 +10,6 @@ setsid nohup .venv/bin/python -u scripts/gen_knowledge_ollama.py \
   --domain python --domain bash --domain algorithms \
   --domain debugging --domain coding_principles \
   --endpoint http://localhost:11434 --out data/knowledge.json \
-  > logs/gen_knowledge.log 2>&1 < /dev/null &
+  >> logs/gen_knowledge.log 2>&1 < /dev/null &
 sleep 2
 echo "A launched (coder:32b, code domains)"

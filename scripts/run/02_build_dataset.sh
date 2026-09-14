@@ -24,6 +24,7 @@ TOKENIZER=${TOKENIZER:-byte}
 PROJECT_FRACTION=${PROJECT_FRACTION:-0}
 PERSONA_FRACTION=${PERSONA_FRACTION:-0}
 FORMAT_FRACTION=${FORMAT_FRACTION:-0}
+DIRECT_FRACTION=${DIRECT_FRACTION:-0}
 MAX_TURNS=${MAX_TURNS:-52}
 CHAR_BUDGET=${CHAR_BUDGET:-60000}
 
@@ -37,4 +38,5 @@ CHAR_BUDGET=${CHAR_BUDGET:-60000}
   --scenario-fraction "$SCENARIO_FRACTION" \
   --workers "$WORKERS" --tokenizer "$TOKENIZER" \
   --project-fraction "$PROJECT_FRACTION" --max-turns "$MAX_TURNS" --char-budget "$CHAR_BUDGET" \
-  --persona-fraction "$PERSONA_FRACTION" --format-fraction "$FORMAT_FRACTION"
+  --persona-fraction "$PERSONA_FRACTION" --format-fraction "$FORMAT_FRACTION" \
+  --direct-fraction "$DIRECT_FRACTION"

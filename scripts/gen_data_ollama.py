@@ -26,6 +26,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib import error as urlerror
 from urllib import request as urlrequest
 
 sys.path.insert(0, "/home/lmeadows/llm")
@@ -36,7 +37,8 @@ _counter = threading.local()
 
 def ollama_chat(prompt: str, model: str, endpoint: str,
                 temperature: float = 1.0, timeout: int = 300,
-                num_predict: int = 2048, fmt=None) -> str:
+                num_predict: int = 2048, fmt=None, think=False,
+                retries: int = 4) -> str:
     """``fmt`` is Ollama's ``format``: "json" or a JSON schema.
 
     Worth using for anything that must parse. Unconstrained, the teacher
@@ -47,18 +49,27 @@ def ollama_chat(prompt: str, model: str, endpoint: str,
     payload = {
         "model": model,
         "stream": False,
-        "think": False,
+        "think": think,
         "messages": [{"role": "user", "content": prompt}],
         "options": {"temperature": temperature, "num_predict": num_predict},
     }
     if fmt is not None:
         payload["format"] = fmt
     body = json.dumps(payload).encode()
-    req = urlrequest.Request(f"{endpoint}/api/chat", data=body,
-                             headers={"Content-Type": "application/json"})
-    with urlrequest.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read())
-    return data.get("message", {}).get("content", "")
+    # Cloud endpoints rate-limit: a burst of concurrent requests earns a 429
+    # for every one of them. Back off rather than discarding the batch.
+    for attempt in range(retries):
+        req = urlrequest.Request(f"{endpoint}/api/chat", data=body,
+                                 headers={"Content-Type": "application/json"})
+        try:
+            with urlrequest.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read())
+            return data.get("message", {}).get("content", "")
+        except urlerror.HTTPError as exc:
+            if exc.code not in (429, 503) or attempt == retries - 1:
+                raise
+            time.sleep(5 * (2 ** attempt))
+    return ""
 
 
 def save_atomic(obj, path: str):
