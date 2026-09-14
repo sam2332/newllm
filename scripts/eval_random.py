@@ -88,9 +88,10 @@ def main():
     ap.add_argument("--seed", type=int, default=42,
                     help="must match the training seed to reproduce the split")
     ap.add_argument("--device", default="cuda")
-    ap.add_argument("--max-steps", type=int, default=20,
-                    help="deep chains run past 12 hops; too low "
-                         "scores them 0 by construction")
+    ap.add_argument("--max-steps", type=int, default=64,
+                    help="the deepest reference chains are 77 hops; "
+                         "at 20 this scores 14.7% of traces 0 "
+                         "by construction, at 64 only 0.2%")
     ap.add_argument("--max-new", type=int, default=256)
     ap.add_argument("--constrained", action="store_true",
                     help="mask logits to the schema's grammar, so a tool name "

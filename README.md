@@ -6,7 +6,7 @@ protocol. Byte-level, 74.8M parameters, no pretrained weights.
 The goal is **the smallest model that can accurately do tools and chat, with some
 roleplay, usable from Ollama** - see [goals.md](goals.md).
 
-Current state, honestly: tool use works and scores **35/100** on held-out traces;
+Current state, honestly: tool use works and scores **41/100** on held-out traces;
 chat is trained-but-never-run; roleplay does not exist yet. Full detail in
 [HANDOFF.md](HANDOFF.md).
 
@@ -97,9 +97,9 @@ one case is worth 5.9 points and 13 of 17 are single-hop toy questions. It is
 deliberately **off** as a training signal, having twice caused real damage.
 
 ```
-35/100 held-out, by tool calls needed:
+41/100 held-out, by tool calls needed:
   1 call   15/20      2 calls  10/12
-  3 calls   6/19      4+ calls  4/49   <- half the distribution
+  3 calls   6/19      4+ calls 10/49   <- half the distribution
 ```
 
 ## Tools

@@ -131,7 +131,8 @@ def _select_final_answer(response: str, steps: list) -> str:
 
 
 def run_agent(model, question: str, toolbox: Toolbox,
-              max_steps: int = 5, max_new: int = 4096,
+              max_steps: int = 64, max_new: int = 4096,
+              max_total_new: int = 16384,
               sampler: Sampler = None, device: str = "cuda",
               greedy: bool = False,
               tokenizer: AgentTokenizer = DEFAULT_AGENT_TOKENIZER,
@@ -139,6 +140,15 @@ def run_agent(model, question: str, toolbox: Toolbox,
               conversation: list = None,
               system: str = None) -> dict:
     """Run an interactive JSON tool-use loop with the model.
+
+    ``max_steps`` defaults high because the data demands it: 44.6% of training
+    traces need more than 5 tool calls and the deepest need 77, so the old
+    default of 5 made nearly half the distribution structurally unreachable
+    regardless of how good the model was. At 64, 0.2% remains out of reach.
+
+    ``max_total_new`` bounds the whole run rather than one step. Without it,
+    64 steps x 4,096 tokens is ~55 minutes of decode for a single request that
+    never emits a closing tag - fine in an eval, unacceptable in a server.
 
     ``max_new`` is a ceiling, not a target: generation stops at
     ``</assistant>``, so an ordinary tool call still costs the ~100 tokens it
@@ -167,6 +177,7 @@ def run_agent(model, question: str, toolbox: Toolbox,
 
     max_len = getattr(model, "max_len", 512)
     history = []
+    spent = 0
     trace_parts = [f"<user>{question}</user>"]
     turn_blocks = []
     steps = []
@@ -179,8 +190,12 @@ def run_agent(model, question: str, toolbox: Toolbox,
             context_tokens = context_tokens[-max_len:]
 
         # One incremental pass with a KV cache, stopping at </assistant>.
-        delta = generate(model, context_tokens, sampler, max_new=max_new,
+        budget = min(max_new, max_total_new - spent) if max_total_new else max_new
+        if budget <= 0:
+            break
+        delta = generate(model, context_tokens, sampler, max_new=budget,
                          device=device, tokenizer=tokenizer, grammar=grammar)
+        spent += len(tokenizer.encode(delta))
 
         full_text = context + delta
         context_char_len = len(context)

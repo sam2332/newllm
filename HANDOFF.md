@@ -19,7 +19,7 @@ roleplay**, usable from Ollama.
 
 | capability | state |
 |---|---|
-| tool use (instruct) | **35/100** on held-out traces. Works; not accurate yet |
+| tool use (instruct) | **41/100** on held-out traces. Works; not accurate yet |
 | chat | **never trained.** Pipeline and eval are ready and unused |
 | roleplay | **does not exist.** No data, no eval, no format decision |
 | smallest viable size | **never tested.** Every number here is the M preset |
@@ -28,15 +28,15 @@ roleplay**, usable from Ollama.
 Best checkpoint: `checkpoints_long_M/agent_best.pt` (40,000 iters, val 0.0434).
 
 ```
-35/100 correct, by tool calls the reference needed:
+41/100 correct, by tool calls the reference needed:
   1 call   15/20     <- fine
   2 calls  10/12     <- fine
   3 calls   6/19
-  4+ calls  4/49     <- half the distribution lives here
+  4+ calls 10/49     <- half the distribution lives here
 ```
 
 **That last row is the whole result.** 49 of 100 held-out traces need four or
-more tool calls and the model gets 4 of them. Everything else is in decent shape.
+more tool calls and the model gets 10 of them. Everything else is in decent shape.
 
 ## Environment
 
@@ -208,6 +208,34 @@ scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt
   switch and no-tool-needed separately. **Never run against a trained model.**
 - `scripts/diag_deep_chains.py` - classifies *why* deep chains fail.
 
+## Two caps that were hiding real accuracy
+
+Both of these depressed measurements that were then reported as model quality.
+
+**`max_steps`.** `run_agent` defaulted to 5, while **44.6% of traces need more
+than 5 tool calls** and the deepest need 77. A trace needing more steps than the
+cap scores 0 no matter how good the model is. Raising the eval from 20 to 64
+took the score from 35/100 to **41/100**, with the 4+ bucket going 4/49 -> 10/49
+and the shallow buckets byte-identical - the signature of a cap artifact rather
+than noise.
+
+| max_steps | unreachable |
+|---|---|
+| 5 (old default) | 44.6% |
+| 20 | 14.7% |
+| 32 | 7.9% |
+| **64 (current)** | **0.2%** |
+
+`run_agent` now defaults to 64 with a `max_total_new` budget of 16,384 tokens
+across the whole run, because 64 steps x 4,096 tokens is otherwise ~55 minutes
+of decode for one request that never emits a closing tag.
+
+**Response length in the data.** The final `response` field averages **11
+characters**, p99 is 132 and the longest in 20,000 traces is 313. **Not one
+response exceeds 500 characters.** Raising `max_new` to 4,096 therefore does
+nothing on its own - the model emits ~11 characters and stops, because that is
+all it has ever seen. Long responses need generated data, not a bigger cap.
+
 ## What is actually wrong
 
 `diag_deep_chains.py` on 40 traces needing 4+ calls: **35 diverged at hop 0**.
@@ -235,7 +263,7 @@ sat level with val, so there was no overfitting to stop for.
 | | 12k iters | 40k iters |
 |---|---|---|
 | best val | 0.0709 | **0.0434** |
-| held-out | 22/100 | **35/100** |
+| held-out | 22/100 | **41/100** |
 
 Every bucket improved; the largest gain was single-call (7/20 -> 15/20), exactly
 as the hop-0 diagnosis predicted. Validation loss is now flattening (0.0460 @

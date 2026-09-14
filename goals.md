@@ -17,8 +17,8 @@ Four things have to be true at once, and only the first has been measured.
 Read tool schemas from context and call them correctly, including tools never
 seen in training.
 
-- now: **35/100** on held-out traces
-- blocker: chains of 4+ calls score **4/49**, and that is half the distribution
+- now: **41/100** on held-out traces
+- blocker: chains of 4+ calls score **10/49**, and that is half the distribution
 - the failure is grounding on the *first* call, not depth
 
 ### 2. Chat - not started
