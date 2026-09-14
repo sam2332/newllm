@@ -51,6 +51,11 @@ NAME_POOLS = {
                    "dir_listing", "lf2_list"],
     "repo_stats": ["repo_stats", "codebase_summary", "project_info",
                    "repo_overview", "rs4_stats"],
+    # workspace tier (agent/workspace_tools.py)
+    "write_file": ["write_file", "save_file", "create_file", "put_file",
+                   "store_document", "wf1_write", "write_text"],
+    "append_file": ["append_file", "add_to_file", "append_text", "extend_file",
+                    "af2_append"],
 }
 
 # Paraphrases so the description is not a memorizable constant either.
@@ -92,6 +97,12 @@ DESCRIPTIONS = {
     "repo_stats": ["Summarize the repository structure and size.",
                    "Report file and line counts per directory.",
                    "Give an overview of the codebase."],
+    "write_file": ["Create or overwrite a text file in the workspace.",
+                   "Save text to a file.",
+                   "Write the given content to a file, replacing it."],
+    "append_file": ["Append text to the end of a workspace file.",
+                    "Add more text to an existing file.",
+                    "Extend a file with additional content."],
 }
 
 PARAM_SCHEMAS = {
@@ -107,6 +118,8 @@ PARAM_SCHEMAS = {
     "search_code": {"query": "Literal text to find."},
     "list_files": {"pattern": "Substring filter."},
     "repo_stats": {},
+    "write_file": {"path": "Relative file path.", "content": "Full file contents."},
+    "append_file": {"path": "Relative file path.", "content": "Text to append."},
 }
 
 # Surface names for each canonical parameter. Training never varied these
@@ -127,6 +140,7 @@ PARAM_NAME_POOLS = {
     "start": ["start", "offset", "from_line", "begin", "first"],
     "lines": ["lines", "count", "n", "limit", "how_many"],
     "pattern": ["pattern", "glob", "filter", "match", "substring"],
+    "content": ["content", "text", "body", "data", "contents"],
 }
 
 PARAM_DESCRIPTIONS = {
@@ -143,6 +157,7 @@ PARAM_DESCRIPTIONS = {
     "start": ["First line number.", "Line to start from."],
     "lines": ["How many lines.", "Number of lines to return."],
     "pattern": ["Substring filter.", "Only paths containing this."],
+    "content": ["The text to write.", "File contents.", "Body of the file."],
 }
 
 REQUIRED = {
@@ -150,6 +165,7 @@ REQUIRED = {
     "now": [], "run_bash": ["command"], "run_python": ["code"],
     "describe_symbol": ["name"], "read_file": ["path"],
     "search_code": ["query"], "list_files": ["pattern"], "repo_stats": [],
+    "write_file": ["path", "content"], "append_file": ["path", "content"],
 }
 
 

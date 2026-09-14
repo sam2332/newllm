@@ -57,7 +57,8 @@ def _worker(args):
     """Generate and tokenize one shard. Runs in a separate process."""
     (shard_idx, n, mode, pool_path, scenarios_path, scenario_fraction,
      deep_fraction, deep_min, deep_max, max_len, seed, randomize_tools,
-     tokenizer_spec, protocol, style_mix) = args
+     tokenizer_spec, protocol, style_mix, extras) = args
+    extras = extras or {}
     # Imports happen per-process; each shard gets its own seed so the shards
     # are different data rather than the same data repeated.
     from agent.rich_dataset import load_pool, generate
@@ -83,6 +84,17 @@ def _worker(args):
             sandbox_pool=pool.get("sandbox"))
         traces.extend(got)
 
+    # Long multi-turn projects over the virtual workspace (agent/project_traces).
+    project_fraction = extras.get("project_fraction", 0.0)
+    stories_path = extras.get("stories")
+    if project_fraction and stories_path and os.path.exists(stories_path):
+        from agent.project_traces import generate_project_traces
+        stories = json.load(open(stories_path))
+        want = int(n * project_fraction)
+        traces.extend(generate_project_traces(
+            stories, want, seed=shard_seed + 5, max_turns=extras.get("max_turns", 52),
+            char_budget=extras.get("char_budget", 60000)))
+
     remaining = max(0, n - len(traces))
     if remaining:
         got, _ = generate(pool, remaining, mode=mode, max_len=max_len,
@@ -98,6 +110,18 @@ def _worker(args):
         rng = random.Random(shard_seed + 77)
         sampler = ToolSchemaSampler(rng)
         traces = [randomize_trace(t, rng, sampler) for t in traces]
+
+    # System-prompt families: persona voice and output-format rules. After
+    # randomize_trace so the free-text block lands after the schema block.
+    persona_fraction = extras.get("persona_fraction", 0.0)
+    format_fraction = extras.get("format_fraction", 0.0)
+    if persona_fraction or format_fraction:
+        from agent.system_prompts import decorate_traces
+        personas = []
+        if persona_fraction and extras.get("personas") and os.path.exists(extras["personas"]):
+            personas = json.load(open(extras["personas"]))
+        traces = decorate_traces(traces, random.Random(shard_seed + 31), personas,
+                                 persona_fraction if personas else 0.0, format_fraction)
 
     # Tokenize in the same process: the traces never cross a pipe as strings,
     # only the far smaller token/mask arrays do.
@@ -128,16 +152,23 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
           scenarios_path=None, scenario_fraction=0.0, deep_fraction=0.0,
           deep_min=4, deep_max=12, max_len=16384, seed=42, workers=None,
           cache=True, verbose=True, randomize_tools=True,
-          tokenizer_spec=None, protocol="json", style_mix=None):
-    """Return a list of (tokens, mask) pairs, built in parallel and cached."""
+          tokenizer_spec=None, protocol="json", style_mix=None, extras=None):
+    """Return a list of (tokens, mask) pairs, built in parallel and cached.
+
+    ``extras``: ``project_fraction``, ``stories`` (path), ``max_turns``,
+    ``char_budget``, ``persona_fraction``, ``personas`` (path),
+    ``format_fraction``. All part of the cache key.
+    """
     workers = workers or min(64, max(1, (os.cpu_count() or 8) - 4))
     style_mix = style_mix or DEFAULT_STYLE_MIX
+    extras = extras or {}
     key = cache_key(samples=samples, mode=mode, pool=pool_path,
                     scenarios=scenarios_path, sf=scenario_fraction,
                     df=deep_fraction, dmin=deep_min, dmax=deep_max,
                     max_len=max_len, seed=seed, rt=randomize_tools,
                     tok=tokenizer_key(tokenizer_spec), protocol=protocol,
-                    styles=style_mix if protocol == "chatml" else None)
+                    styles=style_mix if protocol == "chatml" else None,
+                    extras=extras or None)
     path = os.path.join(CACHE_DIR, f"{mode}_{key}.pt")
 
     if cache and os.path.exists(path):
@@ -149,7 +180,7 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
     per = max(1, samples // shards)
     jobs = [(i, per, mode, pool_path, scenarios_path, scenario_fraction,
              deep_fraction, deep_min, deep_max, max_len, seed,
-             randomize_tools, tokenizer_spec, protocol, style_mix)
+             randomize_tools, tokenizer_spec, protocol, style_mix, extras)
             for i in range(shards)]
 
     if verbose:
@@ -176,7 +207,7 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
                    "df": deep_fraction, "dmin": deep_min, "dmax": deep_max,
                    "max_len": max_len, "seed": seed, "rt": randomize_tools,
                    "tokenizer": tokenizer_spec, "protocol": protocol,
-                   "styles": style_mix},
+                   "styles": style_mix, "extras": extras},
                   open(path.replace(".pt", ".json"), "w"), indent=1)
         if verbose:
             print(f"  cached -> {path}", flush=True)

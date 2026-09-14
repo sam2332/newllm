@@ -33,6 +33,14 @@ def main():
     ap.add_argument("--deep-min", type=int, default=4)
     ap.add_argument("--deep-max", type=int, default=12)
     ap.add_argument("--workers", type=int, default=48)
+    ap.add_argument("--project-fraction", type=float, default=0.0,
+                    help="fraction of traces that are long workspace projects")
+    ap.add_argument("--stories", default="data/chapters.json")
+    ap.add_argument("--max-turns", type=int, default=52)
+    ap.add_argument("--char-budget", type=int, default=60000)
+    ap.add_argument("--persona-fraction", type=float, default=0.0)
+    ap.add_argument("--personas", default="data/personas.json")
+    ap.add_argument("--format-fraction", type=float, default=0.0)
     ap.add_argument("--tokenizer", default="byte",
                     help="'byte' or a path to an HF tokenizer.json")
     ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
@@ -42,6 +50,12 @@ def main():
     tok = load_tokenizer(args.tokenizer)
     tokenizer_spec = spec_for(tok)
     protocol = args.protocol or ("chatml" if tokenizer_spec["kind"] == "bpe" else "json")
+    extras = {k: v for k, v in dict(
+        project_fraction=args.project_fraction, stories=args.stories,
+        max_turns=args.max_turns, char_budget=args.char_budget,
+        persona_fraction=args.persona_fraction, personas=args.personas,
+        format_fraction=args.format_fraction).items()
+        if v not in (0, 0.0, None)} or None
 
     scenarios = args.scenarios if args.scenario_fraction else None
     from agent.dataset_builder import DEFAULT_STYLE_MIX
@@ -61,7 +75,8 @@ def main():
                  deep_fraction=args.deep_fraction, deep_min=args.deep_min,
                  deep_max=args.deep_max, max_len=args.max_len, seed=args.seed,
                  workers=args.workers, verbose=True,
-                 tokenizer_spec=tokenizer_spec, protocol=protocol)
+                 tokenizer_spec=tokenizer_spec, protocol=protocol,
+                 extras=extras)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
     json.dump(params, open(path.replace(".pt", ".json"), "w"), indent=1)

@@ -158,6 +158,14 @@ def main():
     ap.add_argument("--val-batches", type=int, default=0,
                     help="limit the validation pass to N batches (0 = all); "
                          "a full pass over 12.5k samples costs minutes")
+    ap.add_argument("--project-fraction", type=float, default=0.0,
+                    help="fraction of traces that are long workspace projects")
+    ap.add_argument("--stories", default="data/chapters.json")
+    ap.add_argument("--max-turns", type=int, default=52)
+    ap.add_argument("--char-budget", type=int, default=60000)
+    ap.add_argument("--persona-fraction", type=float, default=0.0)
+    ap.add_argument("--personas", default="data/personas.json")
+    ap.add_argument("--format-fraction", type=float, default=0.0)
     ap.add_argument("--tokenizer", default="byte",
                     help="'byte' (legacy) or a path to an HF tokenizer.json")
     ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
@@ -208,7 +216,13 @@ def main():
         deep_fraction=args.deep_fraction, deep_min=args.deep_min,
         deep_max=args.deep_max, max_len=max_len, seed=args.seed,
         workers=args.build_workers, tokenizer_spec=tokenizer_spec,
-        protocol=protocol)
+        protocol=protocol,
+        extras={k: v for k, v in dict(
+            project_fraction=args.project_fraction, stories=args.stories,
+            max_turns=args.max_turns, char_budget=args.char_budget,
+            persona_fraction=args.persona_fraction, personas=args.personas,
+            format_fraction=args.format_fraction).items()
+            if v not in (0, 0.0, None)} or None)
     if args.dataset_cache:
         if is_main:
             print(f"loading prebuilt dataset: {args.dataset_cache}", flush=True)
