@@ -383,6 +383,43 @@ At 51 s per long response, `torch.compile` or CUDA graphs on the single-token
 step is the obvious lever, since decode is per-step-overhead bound and flat with
 length.
 
+## The retrain pipeline is proven end to end (2026-09-14)
+
+Everything between "generate data" and "load it in Ollama" now exists and was
+run as one chain on a throwaway 44M model (`/tmp/smoke_chain.sh` in the git
+history of this note): corpus dump -> BPE tokenizer -> ChatML dataset ->
+arch_version=3 MoE training -> the Python server (protocol picked from the
+checkpoint) -> the official `ollama` client -> GGUF export -> `ollama create`
+in the docker instance -> `ollama run`.
+
+Measured on the smoke run:
+- **BPE compression on ChatML traces: 4.14x** over byte-level (2,785 -> 672
+  tokens per trace at 4k vocab), better than the 3.01x on the old format.
+- **Export equivalence** (`scripts/test_export_gguf.py`): PyTorch and llama.cpp
+  agree on the `<think>` prediction, and next-token logprobs agree within
+  0.10 at 32 tokens and **0.027 at 287 tokens with 10/10 top-10 overlap**.
+  The remaining difference is the f16 KV cache.
+- MoE presets at the mean BPE trace length (batch 2, grad checkpointing):
+  L-moe 464M/152M active 292 ms; deep-moe-20 561M/172M 516 ms;
+  deep-moe-24 671M/204M 632 ms. The Python expert loop is ~3.4x a dense step
+  at equal active params; worth a grouped-GEMM pass before a long run.
+
+Ollama quirks that cost time and are now handled:
+- A generated CONTROL token (`<think>`) is consumed by Ollama: `eval_count`
+  is one more than the number of logprob entries and it never appears in the
+  text. Distribution comparisons must sit *inside* the thought.
+- `raw: true` bypasses the template AND the thinking parser (`thinking` is
+  null). Fine for comparisons; not how clients will use the model.
+- `$(...)` in bash strips a trailing newline, which silently changes a prompt
+  that ends in `assistant\n`. Drive prompts from Python.
+
+What the retrained model will see: Qwen3's exact Jinja rendering 60% of the
+time, Ollama's Go-template rendering 30% (no newlines inside `<think>`, one
+`<tool_call>` pair, unmerged tool results, blank line after `system`), a
+compact serialization 10%. The `ollama` style is a best-effort reading of the
+Go template; verify it against a live render (`OLLAMA_DEBUG=1`) before the
+big run.
+
 ## Next
 
 1. **Train the chat model.** Half the stated goal, pipeline ready, zero
