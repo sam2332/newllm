@@ -198,8 +198,8 @@ JSON only, no markdown."""
 
 def gen_explain(model, domain, topic, n, endpoint):
     text = ollama_chat(EXPLAIN_PROMPT.format(n=n, topic=topic, domain=domain),
-                       model, endpoint, temperature=0.9, timeout=600,
-                       num_predict=4096, fmt=SCHEMA)
+                       model, endpoint, temperature=0.9, timeout=900,
+                       num_predict=max(4096, 900 * n), fmt=SCHEMA)
     out = []
     for it in (json.loads(text).get("items") or []):
         if not isinstance(it, dict):
@@ -220,8 +220,8 @@ def gen_explain(model, domain, topic, n, endpoint):
 def gen_artifact(model, domain, lang, ext, topic, n, lo, hi, endpoint):
     text = ollama_chat(ARTIFACT_PROMPT.format(n=n, lang=lang, ext=ext, topic=topic,
                                               lo=lo, hi=hi),
-                       model, endpoint, temperature=0.9, timeout=900,
-                       num_predict=6144, fmt=ARTIFACT_SCHEMA)
+                       model, endpoint, temperature=0.9, timeout=1200,
+                       num_predict=max(6144, 1800 * n), fmt=ARTIFACT_SCHEMA)
     out = []
     for it in (json.loads(text).get("items") or []):
         if not isinstance(it, dict):
