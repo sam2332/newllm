@@ -20,6 +20,20 @@ sys.path.insert(0, "/home/lmeadows/llm")
 from agent.dataset_builder import build, cache_key, CACHE_DIR
 
 
+def count_tool_calls(text: str, protocol: str) -> int:
+    """Tool calls the ASSISTANT made.
+
+    In ChatML the system block's instructions contain "<tool_call>" twice by
+    template, so a naive count reports every schema-carrying trace as having
+    at least two calls - which made single-tool and no-tool traces vanish from
+    the report entirely.
+    """
+    if protocol != "chatml":
+        return text.count('"tool_call"')
+    body = text.split("<|im_end|>", 1)[1] if text.startswith("<|im_start|>system") else text
+    return body.count("<tool_call>")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="instruct", choices=["instruct", "chat"])
@@ -41,6 +55,16 @@ def main():
     ap.add_argument("--persona-fraction", type=float, default=0.0)
     ap.add_argument("--personas", default="data/personas.json")
     ap.add_argument("--format-fraction", type=float, default=0.0)
+    ap.add_argument("--direct-fraction", type=float, default=0.0,
+                    help="fraction of traces that call no tool at all")
+    ap.add_argument("--knowledge-fraction", type=float, default=0.0,
+                    help="fraction of traces drawn from the knowledge library "
+                         "(python, bash, science, coding principles)")
+    ap.add_argument("--knowledge", default="data/knowledge.json")
+    ap.add_argument("--knowledge-explain-fraction", type=float, default=0.5,
+                    help="of the knowledge slice, the share that is pure Q&A "
+                         "with no tool call; the rest are workspace code arcs")
+    ap.add_argument("--knowledge-max-turns", type=int, default=24)
     ap.add_argument("--tokenizer", default="byte",
                     help="'byte' or a path to an HF tokenizer.json")
     ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
@@ -54,22 +78,16 @@ def main():
         project_fraction=args.project_fraction, stories=args.stories,
         max_turns=args.max_turns, char_budget=args.char_budget,
         persona_fraction=args.persona_fraction, personas=args.personas,
-        format_fraction=args.format_fraction).items()
+        format_fraction=args.format_fraction,
+        direct_fraction=args.direct_fraction,
+        knowledge_fraction=args.knowledge_fraction, knowledge=args.knowledge,
+        knowledge_explain_fraction=args.knowledge_explain_fraction,
+        knowledge_max_turns=args.knowledge_max_turns).items()
         if v not in (0, 0.0, None)} or None
 
     scenarios = args.scenarios if args.scenario_fraction else None
-    from agent.dataset_builder import DEFAULT_STYLE_MIX
-    params = dict(samples=args.samples, mode=args.mode, pool=args.pool,
-                  scenarios=scenarios, sf=args.scenario_fraction,
-                  df=args.deep_fraction, dmin=args.deep_min,
-                  dmax=args.deep_max, max_len=args.max_len, seed=args.seed,
-                  rt=True)
-    key = cache_key(**params)
-    path = os.path.join(CACHE_DIR, f"{args.mode}_{key}.pt")
-    print(f"cache key : {key}")
-    print(f"cache path: {path}")
-
-    data = build(samples=args.samples, mode=args.mode, pool_path=args.pool,
+    info = {}
+    data = build(info=info,samples=args.samples, mode=args.mode, pool_path=args.pool,
                  scenarios_path=scenarios,
                  scenario_fraction=args.scenario_fraction,
                  deep_fraction=args.deep_fraction, deep_min=args.deep_min,
@@ -77,9 +95,9 @@ def main():
                  workers=args.workers, verbose=True,
                  tokenizer_spec=tokenizer_spec, protocol=protocol,
                  extras=extras)
+    path = info["path"]
+    print(f"cache key : {info['key']}\ncache path: {path}")
 
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    json.dump(params, open(path.replace(".pt", ".json"), "w"), indent=1)
 
     import collections
     TOK = tok
@@ -89,8 +107,7 @@ def main():
     lens = []
     for i in rng.sample(range(len(data)), min(20000, len(data))):
         text = TOK.decode(data[i][0])
-        hops[text.count("<tool_call>") if protocol == "chatml"
-             else text.count('"tool_call"')] += 1
+        hops[count_tool_calls(text, protocol)] += 1
         lens.append(len(data[i][0]))
     total = sum(hops.values())
     lens.sort()

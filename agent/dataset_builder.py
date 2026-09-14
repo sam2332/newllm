@@ -95,6 +95,38 @@ def _worker(args):
             stories, want, seed=shard_seed + 5, max_turns=extras.get("max_turns", 52),
             char_budget=extras.get("char_budget", 60000)))
 
+    # Subject knowledge: python, bash, science, coding principles
+    # (agent/knowledge_traces.py). Half are pure Q&A with no tool call, so
+    # they also count toward the "answer directly" skill.
+    knowledge_fraction = extras.get("knowledge_fraction", 0.0)
+    knowledge_path = extras.get("knowledge")
+    n_knowledge_direct = 0
+    if knowledge_fraction and knowledge_path and os.path.exists(knowledge_path):
+        from agent.knowledge_traces import generate_knowledge_traces
+        kitems = json.load(open(knowledge_path))
+        want = int(n * knowledge_fraction)
+        ef = extras.get("knowledge_explain_fraction", 0.5)
+        got = generate_knowledge_traces(
+            kitems, want, seed=shard_seed + 23, explain_fraction=ef,
+            max_turns=extras.get("knowledge_max_turns", 24),
+            char_budget=extras.get("char_budget", 60000))
+        # Only the pure-Q&A half has no tool call; the artifact arcs use the
+        # workspace and must keep their real schema.
+        n_knowledge_direct = sum(1 for t in got if "tool_call" not in t)
+        traces.extend(got)
+
+    # Conversations that call nothing (agent/direct_traces.py).
+    direct_fraction = extras.get("direct_fraction", 0.0)
+    n_direct = 0
+    if direct_fraction:
+        from agent.direct_traces import generate_direct_traces
+        stories = []
+        if stories_path and os.path.exists(stories_path):
+            stories = json.load(open(stories_path))
+        n_direct = int(n * direct_fraction)
+        direct = generate_direct_traces(n_direct, stories, seed=shard_seed + 13)
+        traces.extend(direct)
+
     remaining = max(0, n - len(traces))
     if remaining:
         got, _ = generate(pool, remaining, mode=mode, max_len=max_len,
@@ -109,7 +141,11 @@ def _worker(args):
         from agent.tool_schema import randomize_trace, ToolSchemaSampler
         rng = random.Random(shard_seed + 77)
         sampler = ToolSchemaSampler(rng)
-        traces = [randomize_trace(t, rng, sampler) for t in traces]
+        # Half the no-tool traces get a schema anyway: "tools offered, not
+        # needed" is a distinct skill from "no tools offered".
+        n_forced = (n_direct + n_knowledge_direct) // 2
+        traces = [randomize_trace(t, rng, sampler, force_schema=i < n_forced)
+                  for i, t in enumerate(traces)]
 
     # System-prompt families: persona voice and output-format rules. After
     # randomize_trace so the free-text block lands after the schema block.
@@ -152,12 +188,20 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
           scenarios_path=None, scenario_fraction=0.0, deep_fraction=0.0,
           deep_min=4, deep_max=12, max_len=16384, seed=42, workers=None,
           cache=True, verbose=True, randomize_tools=True,
-          tokenizer_spec=None, protocol="json", style_mix=None, extras=None):
+          tokenizer_spec=None, protocol="json", style_mix=None, extras=None,
+          info=None):
     """Return a list of (tokens, mask) pairs, built in parallel and cached.
 
     ``extras``: ``project_fraction``, ``stories`` (path), ``max_turns``,
     ``char_budget``, ``persona_fraction``, ``personas`` (path),
-    ``format_fraction``. All part of the cache key.
+    ``format_fraction``, ``direct_fraction``, ``knowledge`` (path),
+    ``knowledge_fraction``, ``knowledge_explain_fraction``,
+    ``knowledge_max_turns``. All part of the cache key.
+
+    ``info``, if given, receives ``{"path", "key"}``. Callers must use this
+    rather than recomputing the key: a caller that rebuilt the parameter dict
+    by hand silently dropped the tokenizer, protocol and extras from it and
+    printed a path to a file that did not exist.
     """
     workers = workers or min(64, max(1, (os.cpu_count() or 8) - 4))
     style_mix = style_mix or DEFAULT_STYLE_MIX
@@ -170,6 +214,8 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
                     styles=style_mix if protocol == "chatml" else None,
                     extras=extras or None)
     path = os.path.join(CACHE_DIR, f"{mode}_{key}.pt")
+    if info is not None:
+        info["path"], info["key"] = path, key
 
     if cache and os.path.exists(path):
         if verbose:
