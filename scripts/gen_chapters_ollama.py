@@ -21,7 +21,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
-from scripts.gen_data_ollama import ENDPOINTS, ollama_chat, parse_json_array
+from scripts.gen_data_ollama import (ENDPOINTS, ollama_chat, parse_json_array,
+                                     save_atomic)
 
 GENRES = ["space opera", "cozy mystery", "epic fantasy", "hard science fiction",
           "gothic horror", "heist thriller", "coming-of-age", "post-apocalyptic survival",
@@ -30,10 +31,41 @@ GENRES = ["space opera", "cozy mystery", "epic fantasy", "hard science fiction",
           "workplace comedy", "supernatural mystery", "sports drama", "political intrigue"]
 
 OUTLINE_PROMPT = """Invent {n} original {genre} stories. Return ONLY a JSON array.
-Each element: {{"title": str, "premise": 2 sentences, "protagonist": {{"name": str, "trait": str}},
+Return {{"stories": [...]}}. Each story: {{"title": str, "premise": 2 sentences, "protagonist": {{"name": str, "trait": str}},
 "characters": [3-5 objects with "name" and "role"], "setting": one line,
 "chapters": [exactly {chapters} objects with "title" and "summary" (2 sentences, concrete events)]}}.
 Vary tone, era and structure. JSON only, no markdown."""
+
+OUTLINE_SCHEMA = {
+    "type": "object",
+    "properties": {"stories": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "premise": {"type": "string"},
+                "protagonist": {"type": "object",
+                                "properties": {"name": {"type": "string"},
+                                               "trait": {"type": "string"}},
+                                "required": ["name", "trait"]},
+                "characters": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"},
+                                   "role": {"type": "string"}},
+                    "required": ["name", "role"]}},
+                "setting": {"type": "string"},
+                "chapters": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"title": {"type": "string"},
+                                   "summary": {"type": "string"}},
+                    "required": ["title", "summary"]}},
+            },
+            "required": ["title", "premise", "protagonist", "characters",
+                         "setting", "chapters"],
+        }}},
+    "required": ["stories"],
+}
 
 CHAPTER_PROMPT = """You are writing chapter {i} of {n}, titled "{ctitle}", of the {genre} story "{title}".
 Premise: {premise}
@@ -47,9 +79,10 @@ def gen_outlines(model, genre, n, chapters, endpoint):
     # Two stories per request: five overflowed the token budget and the
     # truncated JSON was thrown away.
     text = ollama_chat(OUTLINE_PROMPT.format(n=n, genre=genre, chapters=chapters),
-                       model, endpoint, temperature=1.0, timeout=600, num_predict=4096)
+                       model, endpoint, temperature=1.0, timeout=600,
+                       num_predict=4096, fmt=OUTLINE_SCHEMA)
     out = []
-    for s in parse_json_array(text) or []:
+    for s in (json.loads(text).get("stories") or []):
         if not isinstance(s, dict) or not isinstance(s.get("chapters"), list):
             continue
         chs = [c for c in s["chapters"] if isinstance(c, dict)
@@ -90,37 +123,56 @@ def main():
     ap.add_argument("--max-chars", type=int, default=2400)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out", default="data/chapters.json")
+    ap.add_argument("--endpoints", type=int, default=len(ENDPOINTS),
+                    help="how many Ollama endpoints to use; 1 keeps the second "
+                         "GPU idle")
+    ap.add_argument("--save-every", type=int, default=10,
+                    help="persist after this many chapters")
     args = ap.parse_args()
+    endpoints = ENDPOINTS[:max(1, args.endpoints)]
+    partial_path = args.out.replace(".json", ".partial.json")
 
     rng = random.Random(0)
     existing = json.load(open(args.out)) if os.path.exists(args.out) else []
     t0 = time.time()
 
+    # Resume: outlines and any chapters already written live in the partial
+    # file, so a restart after a power cut re-does only unfinished chapters.
+    resumed = json.load(open(partial_path)) if os.path.exists(partial_path) else []
+    if resumed:
+        have = sum(1 for s in resumed for c in s["chapters"] if c.get("text"))
+        total = sum(len(s["chapters"]) for s in resumed)
+        print(f"resuming {partial_path}: {len(resumed)} outlines, "
+              f"{have}/{total} chapters already written")
+
     # Pass 1: outlines, ~5 stories per request, genres round-robin.
     per_req = 2
-    n_req = max(1, args.stories // per_req)
-    stories = []
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = [ex.submit(gen_outlines, args.model, GENRES[i % len(GENRES)], per_req,
-                          args.chapters, ENDPOINTS[i % len(ENDPOINTS)])
-                for i in range(n_req)]
-        for k, f in enumerate(as_completed(futs), 1):
-            try:
-                got = f.result()
-            except Exception as exc:                            # noqa: BLE001
-                print(f"  outline request failed: {exc}"[:90])
-                continue
-            stories.extend(got)
-            print(f"  outlines [{k}/{n_req}] +{len(got)} (total {len(stories)})", flush=True)
-    print(f"{len(stories)} outlines in {(time.time()-t0)/60:.1f} min", flush=True)
+    stories = resumed
+    if not stories:
+        n_req = max(1, args.stories // per_req)
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futs = [ex.submit(gen_outlines, args.model, GENRES[i % len(GENRES)], per_req,
+                              args.chapters, endpoints[i % len(endpoints)])
+                    for i in range(n_req)]
+            for k, f in enumerate(as_completed(futs), 1):
+                try:
+                    got = f.result()
+                except Exception as exc:                        # noqa: BLE001
+                    print(f"  outline request failed: {exc}"[:90])
+                    continue
+                stories.extend(got)
+                save_atomic(stories, partial_path)
+                print(f"  outlines [{k}/{n_req}] +{len(got)} (total {len(stories)})", flush=True)
+        print(f"{len(stories)} outlines in {(time.time()-t0)/60:.1f} min", flush=True)
 
     # Pass 2: every chapter of every story, fully parallel.
-    jobs = [(si, ci) for si, s in enumerate(stories) for ci in range(len(s["chapters"]))]
+    jobs = [(si, ci) for si, s in enumerate(stories) for ci in range(len(s["chapters"]))
+            if not s["chapters"][ci].get("text")]
     print(f"{len(jobs)} chapters to write", flush=True)
-    done_n, failed = 0, 0
+    done_n, failed, since_save = 0, 0, 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(gen_chapter, args.model, stories[si], ci, args.min_chars,
-                          args.max_chars, ENDPOINTS[(si + ci) % len(ENDPOINTS)]): (si, ci)
+                          args.max_chars, endpoints[(si + ci) % len(endpoints)]): (si, ci)
                 for si, ci in jobs}
         for f in as_completed(futs):
             si, ci = futs[f]
@@ -135,14 +187,18 @@ def main():
                 failed += 1
                 continue
             stories[si]["chapters"][ci]["text"] = text
+            since_save += 1
+            if since_save >= args.save_every:
+                save_atomic(stories, partial_path)
+                since_save = 0
             if done_n % 25 == 0:
                 print(f"  chapters [{done_n}/{len(jobs)}] failed {failed} "
                       f"elapsed {(time.time()-t0)/60:.1f} min", flush=True)
+    save_atomic(stories, partial_path)
 
     complete = [s for s in stories if all(c.get("text") for c in s["chapters"])]
     out = existing + complete
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    json.dump(out, open(args.out, "w"), indent=1)
+    save_atomic(out, args.out)
     chars = sum(len(c["text"]) for s in complete for c in s["chapters"])
     print(f"\n{len(complete)} complete stories, {sum(len(s['chapters']) for s in complete)} "
           f"chapters, {chars/1e6:.1f} MB prose in {(time.time()-t0)/60:.1f} min "

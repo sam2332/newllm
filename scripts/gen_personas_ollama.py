@@ -18,7 +18,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
-from scripts.gen_data_ollama import ENDPOINTS, ollama_chat, parse_json_array
+from scripts.gen_data_ollama import (ENDPOINTS, ollama_chat, parse_json_array,
+                                     save_atomic)
 
 SEEDS = [
     "gruff starship engineer", "cheerful medieval baker", "hard-boiled noir detective",
@@ -41,7 +42,7 @@ SEEDS = [
 ]
 
 PROMPT = """Create {n} distinct fictional characters in the family "{seed}".
-Return ONLY a JSON array. Each element is an object with keys:
+Return a JSON object {{"personas": [...]}}. Each persona has keys:
 - "name": a distinctive full name or handle
 - "role": one line
 - "voice": 2-3 adjectives describing how they speak
@@ -50,6 +51,30 @@ Return ONLY a JSON array. Each element is an object with keys:
 - "greetings": 3 short in-character greetings
 - "signoffs": 3 short in-character closing lines
 No markdown, no commentary, JSON only."""
+
+# Schema-constrained decoding: Ollama forces the grammar, so a dropped
+# bracket is unrepresentable and a batch can no longer be lost to one.
+SCHEMA = {
+    "type": "object",
+    "properties": {"personas": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "role": {"type": "string"},
+                "voice": {"type": "string"},
+                "system_prompt": {"type": "string"},
+                "wrappers": {"type": "array", "items": {"type": "string"},
+                             "minItems": 6},
+                "greetings": {"type": "array", "items": {"type": "string"}},
+                "signoffs": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["name", "role", "voice", "system_prompt", "wrappers",
+                         "greetings", "signoffs"],
+        }}},
+    "required": ["personas"],
+}
 
 
 def valid(p: dict) -> bool:
@@ -77,24 +102,30 @@ def main():
     ap.add_argument("--rounds", type=int, default=1, help="repeat every seed N times")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out", default="data/personas.json")
+    ap.add_argument("--endpoints", type=int, default=len(ENDPOINTS),
+                    help="how many Ollama endpoints to use; 1 keeps the second "
+                         "GPU idle, which is the configuration that has "
+                         "survived long runs on this machine")
     args = ap.parse_args()
+    endpoints = ENDPOINTS[:max(1, args.endpoints)]
 
     existing = json.load(open(args.out)) if os.path.exists(args.out) else []
     have = {p["name"].lower() for p in existing}
     jobs = [(seed, r) for r in range(args.rounds) for seed in SEEDS]
     print(f"{len(jobs)} requests x {args.per_seed} personas across "
-          f"{len(ENDPOINTS)} endpoints ({args.workers} workers); "
+          f"{len(endpoints)} endpoint(s) ({args.workers} workers); "
           f"{len(existing)} already in {args.out}")
     t0 = time.time()
     new, errors = [], 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(ollama_chat, PROMPT.format(n=args.per_seed, seed=seed),
-                          args.model, ENDPOINTS[i % len(ENDPOINTS)], 1.0): seed
+                          args.model, endpoints[i % len(endpoints)], 1.0,
+                          300, 3000, SCHEMA): seed
                 for i, (seed, _) in enumerate(jobs)}
         for done, fut in enumerate(as_completed(futs), 1):
             seed = futs[fut]
             try:
-                arr = parse_json_array(fut.result())
+                arr = json.loads(fut.result()).get("personas", [])
             except Exception as exc:                            # noqa: BLE001
                 errors += 1
                 print(f"  [{done}/{len(jobs)}] {seed}: {type(exc).__name__}: {exc}"[:90])
@@ -106,10 +137,14 @@ def main():
                     have.add(p["name"].lower())
                     new.append(p)
                     kept += 1
-            print(f"  [{done}/{len(jobs)}] {seed:34s} -> {kept}", flush=True)
+            # Save after every request: a power cut then costs one request,
+            # not the whole run.
+            if kept:
+                save_atomic(existing + new, args.out)
+            print(f"  [{done}/{len(jobs)}] {seed:34s} -> {kept} "
+                  f"(saved {len(existing) + len(new)})", flush=True)
     out = existing + new
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    json.dump(out, open(args.out, "w"), indent=1)
+    save_atomic(out, args.out)
     print(f"\n{len(new)} new personas ({errors} failed requests) in "
           f"{(time.time()-t0)/60:.1f} min -> {args.out} ({len(out)} total)")
 

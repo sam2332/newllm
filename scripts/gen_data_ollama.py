@@ -36,19 +36,45 @@ _counter = threading.local()
 
 def ollama_chat(prompt: str, model: str, endpoint: str,
                 temperature: float = 1.0, timeout: int = 300,
-                num_predict: int = 2048) -> str:
-    body = json.dumps({
+                num_predict: int = 2048, fmt=None) -> str:
+    """``fmt`` is Ollama's ``format``: "json" or a JSON schema.
+
+    Worth using for anything that must parse. Unconstrained, the teacher
+    silently drops a closing bracket often enough to lose whole batches -
+    a run produced a persona array whose last field read
+    ``"signoffs":[...,"Just don't."}]`` and was discarded entire.
+    """
+    payload = {
         "model": model,
         "stream": False,
         "think": False,
         "messages": [{"role": "user", "content": prompt}],
         "options": {"temperature": temperature, "num_predict": num_predict},
-    }).encode()
+    }
+    if fmt is not None:
+        payload["format"] = fmt
+    body = json.dumps(payload).encode()
     req = urlrequest.Request(f"{endpoint}/api/chat", data=body,
                              headers={"Content-Type": "application/json"})
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read())
     return data.get("message", {}).get("content", "")
+
+
+def save_atomic(obj, path: str):
+    """Write JSON via a temp file + rename.
+
+    Generators that only saved at the end lost everything to a power cut.
+    They now save after every completed unit, which makes a partial write the
+    likely failure instead - rename is atomic, so the file on disk is always
+    a complete earlier version.
+    """
+    import os
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(obj, fh, indent=1)
+    os.replace(tmp, path)
 
 
 def parse_json_array(text: str):

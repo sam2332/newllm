@@ -55,6 +55,28 @@ Python 3.12 venv, torch 2.11.0+cu128, bf16 native on both cards. Use
 `.venv/bin/python` for everything; system Python is 3.14 and has no torch
 wheels. `scripts/run/00_preflight.sh` checks all of this.
 
+**The machine has hard-cut twice, and not from GPU load.** Boot logs end
+mid-line with no shutdown sequence and no error entries, then a 10-15 minute
+gap before the next boot:
+
+| when | what was running | draw |
+|---|---|---|
+| 2026-09-13 16:45 | `stress-ng --cpu 128 --vm-bytes 80%` - **no GPU load** | CPU/RAM only |
+| 2026-09-14 02:46 | Ollama inference on **both** endpoints | ~250 W GPU |
+
+Single-GPU training at 350 W has run 89 minutes without incident. So the
+trigger is whole-machine draw, not the GPUs specifically - a 128-core EPYC at
+full tilt is its own large load. Long teacher runs therefore use one endpoint
+(`--endpoints 1`); `scripts/gen_*_ollama.py` save incrementally so a cut costs
+minutes.
+
+Power caps now survive a reboot: `/etc/systemd/system/nvidia-power-limit.service`
+applies `-pl 350` / `-pl 450` at boot. Verify with `nvidia-smi
+--query-gpu=power.limit --format=csv`.
+
+**Write logs to `logs/`, never `/tmp`** - `/tmp` is cleared on reboot, so the
+evidence from a crash disappears exactly when it is wanted.
+
 **After any hard reboot, run `git fsck`.** A power cut corrupted this repo once,
 leaving a zero-byte object and an unreachable HEAD. It was recoverable from the
 reflog.
