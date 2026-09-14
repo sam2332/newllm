@@ -62,3 +62,15 @@ def test_persona_and_format_decoration():
         obj = json.loads(m)
         if "response" in obj:
             assert obj["response"] == obj["response"].upper()
+
+
+def test_decorate_never_drops_a_trace():
+    """A format rule that cannot be satisfied must leave the trace alone, not
+    remove it - the dataset builder counts on one output per input."""
+    from agent.system_prompts import decorate_traces
+    rng = random.Random(5)
+    traces = generate_project_traces([STORY], 12, seed=4, max_turns=10, min_turns=6)
+    for _ in range(5):
+        out = decorate_traces(traces, rng, [PERSONA], 0.4, 0.4)
+        assert len(out) == len(traces)
+        assert all(isinstance(t, str) and t for t in out)

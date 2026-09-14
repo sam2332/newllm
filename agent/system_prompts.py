@@ -82,7 +82,14 @@ def apply_format_rule(text: str, rule: dict, rng: random.Random):
 
 def decorate_traces(traces: list, rng: random.Random, personas: list = None,
                     persona_fraction: float = 0.0, format_fraction: float = 0.0) -> list:
-    """Apply persona / format-rule system prompts to random subsets."""
+    """Apply persona / format-rule system prompts to random subsets.
+
+    Always returns one trace per input. When a format rule cannot be applied
+    so that its own check passes, the trace is emitted UNDECORATED rather than
+    dropped: the data is still good, it just makes no claim about a rule. The
+    invariant that matters is never training a system prompt the answers
+    disobey - not discarding the trace.
+    """
     out = []
     for t in traces:
         r = rng.random()
@@ -90,8 +97,7 @@ def decorate_traces(traces: list, rng: random.Random, personas: list = None,
             out.append(apply_persona(t, rng.choice(personas), rng))
         elif r < persona_fraction + format_fraction:
             done = apply_format_rule(t, rng.choice(RULES), rng)
-            if done is not None:
-                out.append(done)
+            out.append(done if done is not None else t)
         else:
             out.append(t)
     return out

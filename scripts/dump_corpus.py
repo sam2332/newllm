@@ -10,6 +10,7 @@ dataset builder uses and writes them out, one trace per record, separated by
 """
 
 import argparse
+import json
 import os
 import random
 import sys
@@ -33,14 +34,33 @@ def main():
     ap.add_argument("--max-len", type=int, default=32768)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="data/corpus/traces.txt")
+    # The tokenizer must see the mix it will encode. Without the project arcs
+    # it never sees prose, and a vocabulary tuned only on JSON tool traces
+    # compresses chapters badly.
+    ap.add_argument("--project-fraction", type=float, default=0.25)
+    ap.add_argument("--stories", default="data/chapters.json")
+    ap.add_argument("--max-turns", type=int, default=52)
+    ap.add_argument("--persona-fraction", type=float, default=0.2)
+    ap.add_argument("--personas", default="data/personas.json")
+    ap.add_argument("--format-fraction", type=float, default=0.15)
     args = ap.parse_args()
 
     pool = load_pool(args.pool)
     rng = random.Random(args.seed)
     sampler = ToolSchemaSampler(rng)
-    n_chat = int(args.samples * args.chat_fraction)
     traces = []
-    for mode, n in (("instruct", args.samples - n_chat), ("chat", n_chat)):
+
+    n_project = int(args.samples * args.project_fraction)
+    if n_project and os.path.exists(args.stories):
+        from agent.project_traces import generate_project_traces
+        stories = json.load(open(args.stories))
+        traces.extend(generate_project_traces(stories, n_project, seed=args.seed,
+                                              max_turns=args.max_turns, min_turns=8))
+        print(f"  {len(traces):,} long project arcs from {len(stories)} stories")
+
+    rest = args.samples - len(traces)
+    n_chat = int(rest * args.chat_fraction)
+    for mode, n in (("instruct", rest - n_chat), ("chat", n_chat)):
         got, _ = generate(pool, n, mode=mode, max_len=args.max_len, seed=args.seed,
                           deep_fraction=args.deep_fraction if mode == "instruct" else 0.0,
                           deep_min=4, deep_max=40)
@@ -49,9 +69,14 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     chars = 0
+    personas = (json.load(open(args.personas))
+                if args.persona_fraction and os.path.exists(args.personas) else [])
+    from agent.system_prompts import decorate_traces
     with open(args.out, "w", encoding="utf-8") as fh:
         for text in traces:
             text = randomize_trace(text, rng, sampler)
+            text = decorate_traces([text], rng, personas, args.persona_fraction,
+                                   args.format_fraction)[0]
             messages, tools = trace_to_messages(text)
             if not messages:
                 continue
