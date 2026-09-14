@@ -22,6 +22,7 @@ identifier either.
 
 import json
 import random
+import re
 
 # Several surface names per capability, spanning plausible to opaque.
 NAME_POOLS = {
@@ -108,6 +109,42 @@ PARAM_SCHEMAS = {
     "repo_stats": {},
 }
 
+# Surface names for each canonical parameter. Training never varied these
+# before, so given a client tool add_numbers(a, b) the model emitted
+# {"expr": "12 + 8"} - the right tool, an argument shape it had memorized.
+# Randomizing them makes the parameter list something the model has to read
+# from the schema, exactly as it already must for the tool name.
+PARAM_NAME_POOLS = {
+    "expr": ["expr", "expression", "input", "formula", "math", "calculation",
+             "text", "q", "arithmetic", "e"],
+    "key": ["key", "name", "id", "field", "memory_key", "k", "entry", "slot"],
+    "query": ["query", "q", "search", "question", "text", "terms", "lookup",
+              "topic"],
+    "command": ["command", "cmd", "shell", "script", "line"],
+    "code": ["code", "source", "snippet", "python", "program", "src"],
+    "name": ["name", "symbol", "identifier", "target", "definition"],
+    "path": ["path", "file", "filename", "filepath", "location"],
+    "start": ["start", "offset", "from_line", "begin", "first"],
+    "lines": ["lines", "count", "n", "limit", "how_many"],
+    "pattern": ["pattern", "glob", "filter", "match", "substring"],
+}
+
+PARAM_DESCRIPTIONS = {
+    "expr": ["Arithmetic expression to evaluate.", "The math to compute.",
+             "An expression such as 12 + 8.", "Formula to calculate."],
+    "key": ["The key to look up.", "Name of the stored value.",
+            "Which memory entry to read."],
+    "query": ["A short search query.", "What to search for.",
+              "The question to look up."],
+    "command": ["Shell command to run.", "The command line to execute."],
+    "code": ["Python source to execute.", "The snippet to run."],
+    "name": ["Class or function name.", "The symbol to describe."],
+    "path": ["Repo-relative file path.", "Which file to open."],
+    "start": ["First line number.", "Line to start from."],
+    "lines": ["How many lines.", "Number of lines to return."],
+    "pattern": ["Substring filter.", "Only paths containing this."],
+}
+
 REQUIRED = {
     "calc": ["expr"], "search_memory": ["key"], "web_search": ["query"],
     "now": [], "run_bash": ["command"], "run_python": ["code"],
@@ -120,17 +157,22 @@ class ToolSchemaSampler:
     """Produces a randomized schema and the canonical -> surface name map."""
 
     def __init__(self, rng: random.Random, distractor_prob: float = 0.6,
-                 max_distractors: int = 4):
+                 max_distractors: int = 4, param_rename_prob: float = 0.7):
         self.rng = rng
         self.distractor_prob = distractor_prob
         self.max_distractors = max_distractors
+        self.param_rename_prob = param_rename_prob
+        self.last_param_maps = {}
 
     def sample(self, used_tools) -> tuple:
         """Return (mapping, system_block) for this trace.
 
         ``used_tools`` are the canonical tools the trace actually calls.
         Distractors are included so the model must SELECT, not just copy the
-        only option available.
+        only option available. Parameter names are randomized too (see
+        ``PARAM_NAME_POOLS``); the per-tool ``{canonical: surface}`` maps are
+        left in ``self.last_param_maps`` for ``randomize_trace`` to apply to
+        the assistant's arguments.
         """
         used = [t for t in used_tools if t in NAME_POOLS]
         pool = [t for t in NAME_POOLS if t not in set(used)]
@@ -139,23 +181,32 @@ class ToolSchemaSampler:
             k = self.rng.randint(1, min(self.max_distractors, len(pool)))
             extras = self.rng.sample(pool, k)
 
-        mapping, entries = {}, []
+        rename_params = self.rng.random() < self.param_rename_prob
+        mapping, entries, param_maps = {}, [], {}
         for canonical in used + extras:
             surface = self.rng.choice(NAME_POOLS[canonical])
             mapping[canonical] = surface
-            props = {
-                arg: {"type": "integer" if arg in ("start", "lines") else "string",
-                      "description": desc}
-                for arg, desc in PARAM_SCHEMAS[canonical].items()
-            }
+            pmap, props, taken = {}, {}, set()
+            for arg, desc in PARAM_SCHEMAS[canonical].items():
+                choices = [c for c in PARAM_NAME_POOLS.get(arg, [arg]) if c not in taken]
+                new = self.rng.choice(choices) if rename_params and choices else arg
+                taken.add(new)
+                pmap[arg] = new
+                props[new] = {
+                    "type": "integer" if arg in ("start", "lines") else "string",
+                    "description": (self.rng.choice(PARAM_DESCRIPTIONS[arg])
+                                    if rename_params and arg in PARAM_DESCRIPTIONS
+                                    else desc)}
+            param_maps[canonical] = pmap
             entries.append({
                 "name": surface,
                 "description": self.rng.choice(DESCRIPTIONS[canonical]),
                 "parameters": {"type": "object", "properties": props,
-                               "required": REQUIRED[canonical]},
+                               "required": [pmap[a] for a in REQUIRED[canonical]]},
             })
         # Shuffle so position carries no information either.
         self.rng.shuffle(entries)
+        self.last_param_maps = param_maps
         return mapping, _schema_block(entries)
 
 
@@ -231,4 +282,32 @@ def randomize_trace(text: str, rng: random.Random,
         surface = mapping[canonical]
         text = text.replace(f'"name":"{canonical}"', f'"name":"{surface}"')
         text = text.replace(f"<tool name={canonical}>", f"<tool name={surface}>")
+    text = _rename_arguments(text, mapping, sampler.last_param_maps)
     return block + "\n" + text
+
+
+_ASSISTANT_JSON = re.compile(r"(<assistant>)(\{.*?\})(</assistant>)", re.S)
+
+
+def _rename_arguments(text: str, name_map: dict, param_maps: dict) -> str:
+    """Rewrite the argument keys of every tool call to the sampled surface
+    names. The schema block already uses them; the calls must match."""
+    if not param_maps or all(v == {k2: k2 for k2 in v} for v in param_maps.values()):
+        return text
+    surface_to_canonical = {v: k for k, v in name_map.items()}
+
+    def fix(m):
+        try:
+            obj = json.loads(m.group(2))
+        except json.JSONDecodeError:
+            return m.group(0)
+        call = obj.get("tool_call")
+        if isinstance(call, dict):
+            canonical = surface_to_canonical.get(call.get("name"))
+            pmap = param_maps.get(canonical)
+            args = call.get("arguments")
+            if pmap and isinstance(args, dict):
+                call["arguments"] = {pmap.get(k, k): v for k, v in args.items()}
+        return m.group(1) + json.dumps(obj, separators=(",", ":")) + m.group(3)
+
+    return _ASSISTANT_JSON.sub(fix, text)
