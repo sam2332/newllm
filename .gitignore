@@ -34,3 +34,6 @@ data/*.backup*.json
 # Generated artifacts of the tokenizer/export pipeline
 data/corpus/
 *.gguf
+
+# Teacher work-in-progress; the completed library is committed instead.
+data/*.partial.json
