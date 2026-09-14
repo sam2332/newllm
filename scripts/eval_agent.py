@@ -38,23 +38,10 @@ CASES = [
 
 
 def load(path, device="cuda"):
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
-    cfg = dict(ckpt["config"])
-    cfg.pop("n_layers", None)
-    model = Transformer(
-        vocab_size=cfg["vocab_size"], d_model=cfg["d_model"],
-        n_layers=len(set(k.split(".")[1] for k in ckpt["model"]
-                         if k.startswith("layers."))),
-        n_heads=cfg["n_heads"], d_ff=cfg["d_ff"], max_len=cfg["max_len"],
-        dropout=0.0, attention_type=cfg.get("attention_type", "standard"),
-        use_rope=cfg.get("use_rope", True),
-        tie_weights=cfg.get("tie_weights", False),
-        arch_version=cfg.get("arch_version", 1),
-        n_kv_heads=cfg.get("n_kv_heads"),
-        qk_norm=cfg.get("qk_norm", True),
-    )
-    model.load_state_dict(ckpt["model"])
-    return model.to(device).eval()
+    """One loader for every script (agent/chat.py), so new config keys such as
+    rope_base, MoE and the tokenizer spec are honoured everywhere."""
+    from agent.chat import load_checkpoint
+    return load_checkpoint(path, device=device)
 
 
 def score(model, device="cuda", verbose=False, constrained=False,

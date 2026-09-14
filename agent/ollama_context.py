@@ -205,3 +205,48 @@ def assemble_context(messages: list, tools: list, *, num_ctx: int,
             "trimmed_pairs": trimmed_pairs, "hard_cut_tokens": hard_cut,
             "system_blocks": len(head)}
     return context, tokens, info
+
+
+# ------------------------------------------------------- ChatML assembly
+
+def assemble_chatml_context(messages: list, tools: list, *, num_ctx: int,
+                            reserve: int, tokenizer, style: str = "hf",
+                            enable_thinking=None) -> tuple:
+    """Render an Ollama message list with ``agent/chatml.render`` and fit it.
+
+    System messages are merged into one leading system message (the template
+    only reads the first). Truncation drops the oldest user turn (a user
+    message and everything up to the next one) until the prompt fits, never
+    the system message, always keeping the last turn.
+    """
+    from agent.chatml import render
+    systems = [m for m in messages if m.get("role") == "system"]
+    body = [m for m in messages if m.get("role") != "system"]
+    head = ([{"role": "system",
+              "content": "\n".join(str(m.get("content") or "") for m in systems)}]
+            if systems else [])
+    # group into user turns
+    turns, cur = [], None
+    for m in body:
+        if m.get("role") == "user" or cur is None:
+            cur = []
+            turns.append(cur)
+        cur.append(m)
+    limit = max(0, num_ctx - reserve)
+    dropped = 0
+
+    def fits(ts):
+        text, _ = render(head + [m for t in ts for m in t], tools,
+                         add_generation_prompt=True, style=style,
+                         enable_thinking=enable_thinking)
+        return text, len(tokenizer.encode(text))
+
+    text, n = fits(turns)
+    while len(turns) > 1 and n > limit:
+        turns.pop(0)
+        dropped += 1
+        text, n = fits(turns)
+    tokens = tokenizer.encode(text)
+    return text, tokens, {"prompt_tokens": len(tokens), "dropped_turns": dropped,
+                          "trimmed_pairs": 0, "hard_cut_tokens": 0,
+                          "system_blocks": len(head)}

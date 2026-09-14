@@ -47,7 +47,8 @@ class Transformer(nn.Module):
                  arch_version: int = 2,
                  n_kv_heads: int = None,
                  qk_norm: bool = True,
-                 grad_checkpoint: bool = False):
+                 grad_checkpoint: bool = False,
+                 rope_base: float = 10000.0):
         super().__init__()
         self.d_model = d_model
         self.max_len = max_len
@@ -59,6 +60,13 @@ class Transformer(nn.Module):
         self.arch_version = arch_version
         self.n_kv_heads = n_kv_heads or n_heads
         self.qk_norm = qk_norm
+        self.rope_base = rope_base
+        self.use_moe = use_moe
+        self.num_experts = num_experts
+        self.top_k = top_k
+        # Which tokenizer the weights were trained with; set by the trainer
+        # and written into the checkpoint so loaders never have to guess.
+        self.tokenizer_spec = None
         self.vocab_size = vocab_size
         # Recompute layer activations during the backward pass instead of
         # storing them. Costs roughly one extra forward (~30% slower) and turns
@@ -93,7 +101,8 @@ class Transformer(nn.Module):
                                      max_len=max_len,
                                      arch_version=arch_version,
                                      n_kv_heads=n_kv_heads,
-                                     qk_norm=qk_norm)
+                                     qk_norm=qk_norm,
+                                     rope_base=rope_base)
                 )
 
         self.norm = make_norm(d_model, "rms" if arch_version >= 2 else "layer")
@@ -231,4 +240,10 @@ class Transformer(nn.Module):
             "arch_version": self.arch_version,
             "qk_norm": self.qk_norm,
             "grad_checkpoint": self.grad_checkpoint,
+            "rope_base": self.rope_base,
+            "norm_eps": 1e-6,
+            "use_moe": self.use_moe,
+            "num_experts": self.num_experts,
+            "top_k": self.top_k,
+            "tokenizer": self.tokenizer_spec,
         }

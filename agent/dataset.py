@@ -55,6 +55,31 @@ def encode_agent_training_example(text: str, tokenizer: AgentTokenizer = DEFAULT
     return token_ids, target_mask
 
 
+def encode_with_spans(text: str, spans: list, tokenizer=DEFAULT_AGENT_TOKENIZER,
+                      max_len: int = 32768) -> tuple[list[int], list[float]]:
+    """Encode text whose supervised char ranges are given explicitly.
+
+    This is the masking path for the ChatML protocol, where the renderer knows
+    exactly which characters are the assistant's (``agent/chatml.py:render``)
+    and the tags are special tokens, so cutting the text at span boundaries
+    does not change how BPE tokenizes either side.
+    """
+    token_ids, target_mask = [], []
+    position = 0
+    for start, end in spans:
+        context = tokenizer.encode(text[position:start])
+        token_ids.extend(context)
+        target_mask.extend([0.0] * len(context))
+        supervised = tokenizer.encode(text[start:end])
+        token_ids.extend(supervised)
+        target_mask.extend([1.0] * len(supervised))
+        position = end
+    suffix = tokenizer.encode(text[position:])
+    token_ids.extend(suffix)
+    target_mask.extend([0.0] * len(suffix))
+    return token_ids[:max_len], target_mask[:max_len]
+
+
 class AgentDataset(torch.utils.data.Dataset):
     """Tagged JSON traces with labels masked outside assistant messages."""
 

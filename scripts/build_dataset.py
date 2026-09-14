@@ -33,9 +33,18 @@ def main():
     ap.add_argument("--deep-min", type=int, default=4)
     ap.add_argument("--deep-max", type=int, default=12)
     ap.add_argument("--workers", type=int, default=48)
+    ap.add_argument("--tokenizer", default="byte",
+                    help="'byte' or a path to an HF tokenizer.json")
+    ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
+                    help="default chatml for a BPE tokenizer, json for byte")
     args = ap.parse_args()
+    from agent.tokenizer_registry import load_tokenizer, spec_for, tokenizer_key
+    tok = load_tokenizer(args.tokenizer)
+    tokenizer_spec = spec_for(tok)
+    protocol = args.protocol or ("chatml" if tokenizer_spec["kind"] == "bpe" else "json")
 
     scenarios = args.scenarios if args.scenario_fraction else None
+    from agent.dataset_builder import DEFAULT_STYLE_MIX
     params = dict(samples=args.samples, mode=args.mode, pool=args.pool,
                   scenarios=scenarios, sf=args.scenario_fraction,
                   df=args.deep_fraction, dmin=args.deep_min,
@@ -51,20 +60,22 @@ def main():
                  scenario_fraction=args.scenario_fraction,
                  deep_fraction=args.deep_fraction, deep_min=args.deep_min,
                  deep_max=args.deep_max, max_len=args.max_len, seed=args.seed,
-                 workers=args.workers, verbose=True)
+                 workers=args.workers, verbose=True,
+                 tokenizer_spec=tokenizer_spec, protocol=protocol)
 
     os.makedirs(CACHE_DIR, exist_ok=True)
     json.dump(params, open(path.replace(".pt", ".json"), "w"), indent=1)
 
     import collections
-    from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
+    TOK = tok
     import random
     rng = random.Random(0)
     hops = collections.Counter()
     lens = []
     for i in rng.sample(range(len(data)), min(20000, len(data))):
         text = TOK.decode(data[i][0])
-        hops[text.count('"tool_call"')] += 1
+        hops[text.count("<tool_call>") if protocol == "chatml"
+             else text.count('"tool_call"')] += 1
         lens.append(len(data[i][0]))
     total = sum(hops.values())
     lens.sort()
@@ -77,7 +88,8 @@ def main():
         n = sum(v for k, v in hops.items() if lo <= k <= hi)
         print(f"    {label:6s} {n:6,}  {n/max(total,1):6.1%}")
     print(f"    max {max(hops)} hops")
-    print(f"\nTrain against it with:\n  --dataset-cache {path}")
+    print(f"\nTrain against it with:\n  --dataset-cache {path} --tokenizer {args.tokenizer}"
+          f" --protocol {protocol}")
 
 
 if __name__ == "__main__":

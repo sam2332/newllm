@@ -11,7 +11,10 @@ class TextEncoder(nn.Module):
 
     In ``arch_version=2`` this is just a scaled embedding lookup: position is
     supplied by RoPE inside each attention layer, which is where it belongs.
-    ``arch_version=1`` keeps the old whole-embedding rotation.
+    ``arch_version=3`` drops the scale as well - RMSNorm follows the embedding
+    so a constant multiplier is redundant, and llama.cpp has no such op, so a
+    model without it exports as a plain tensor copy. ``arch_version=1`` keeps
+    the old whole-embedding rotation.
     """
 
     def __init__(self, vocab_size: int, d_model: int,
@@ -30,11 +33,11 @@ class TextEncoder(nn.Module):
         if arch_version < 2:
             self.scale = nn.Parameter(torch.tensor(float(d_model) ** 0.5))
         else:
-            # Fixed sqrt(d_model) scale. A *learnable* global scale on the
-            # embedding is redundant once RMSNorm follows it, and it drifts.
-            self.register_buffer("scale",
-                                 torch.tensor(math.sqrt(float(d_model))),
-                                 persistent=False)
+            # Fixed sqrt(d_model) scale in v2 (a *learnable* global scale on
+            # the embedding is redundant once RMSNorm follows it, and it
+            # drifts). Gone entirely in v3 for export parity.
+            scale = math.sqrt(float(d_model)) if arch_version < 3 else 1.0
+            self.register_buffer("scale", torch.tensor(scale), persistent=False)
 
     def forward(self, x: torch.Tensor, offset: int = 0) -> torch.Tensor:
         """

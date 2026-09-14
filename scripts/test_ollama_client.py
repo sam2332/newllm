@@ -144,6 +144,9 @@ def main():
     ap.add_argument("--model", default="newllm-agent")
     ap.add_argument("--checkpoint", default="checkpoints_long_M/agent_best.pt")
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--structural-only", action="store_true",
+                    help="do not require correct answers (smoke-testing an "
+                         "untrained checkpoint)")
     ap.add_argument("--no-constrained", dest="constrained", action="store_false",
                     help="run the server without grammar constraints (expect the "
                          "correctness check to fail on the current checkpoint)")
@@ -173,7 +176,8 @@ def main():
     structural, correct, detail = loop_over_phrasings(client, args.model,
                                                       [SUM_TOOL], "evaluate_sum")
     check("tool name read from the client's schema (evaluate_sum)", structural, detail)
-    check("final answer correct on at least one phrasing", correct, detail)
+    check("final answer correct on at least one phrasing", correct, detail,
+          soft=args.structural_only)
 
     # 3. new name AND new parameter names (not trained; informational)
     structural2, correct2, detail2 = loop_over_phrasings(client, args.model,
@@ -214,9 +218,13 @@ def main():
                        "messages": [{"role": "system", "content": "You are Zed."},
                                     {"role": "user", "content": q}]})
         c = ctx["context"]
-        check("system prompt stacked after schema",
-              c.startswith('<system>{"tools":') and
-              '</system>\n<system>You are Zed.</system>\n<user>' in c)
+        if c.startswith("<|im_start|>"):
+            ok = ("<|im_start|>system\nYou are Zed." in c and "<tools>" in c
+                  and c.rstrip().endswith("<|im_start|>assistant"))
+        else:
+            ok = (c.startswith('<system>{"tools":') and
+                  '</system>\n<system>You are Zed.</system>\n<user>' in c)
+        check("system prompt placed with the tool schema", ok, c[:60].replace("\n", "|"))
 
     # 7. running out of budget is a 200 with done_reason=length
     short = client.chat(model=args.model, messages=messages, tools=[SUM_TOOL],

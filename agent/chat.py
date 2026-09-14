@@ -27,7 +27,7 @@ def load_checkpoint(path: str, device: str = "cuda") -> Transformer:
     # A checkpoint from before the chat tokens were appended is still usable:
     # ids 0-270 kept their meaning, so the model is built at its own vocabulary
     # size rather than being rejected.
-    if vocab_size != current_vocab:
+    if vocab_size != current_vocab and not cfg.get("tokenizer"):
         print(f"note: checkpoint vocab {vocab_size} != current {current_vocab}; "
               f"use AgentTokenizer(max_vocab={vocab_size}) with this checkpoint "
               f"(see load_tokenizer_for)")
@@ -52,21 +52,32 @@ def load_checkpoint(path: str, device: str = "cuda") -> Transformer:
         arch_version=cfg.get("arch_version", 1),
         n_kv_heads=cfg.get("n_kv_heads"),
         qk_norm=cfg.get("qk_norm", True),
+        rope_base=cfg.get("rope_base", 10000.0),
+        use_moe=cfg.get("use_moe", False),
+        num_experts=cfg.get("num_experts", 4),
+        top_k=cfg.get("top_k", 2),
     )
     model.load_state_dict(sd)
     model.to(device)
     model.eval()
+    model.tokenizer_spec = cfg.get("tokenizer")
+    model.checkpoint_dir = os.path.dirname(os.path.abspath(path))
     print(f"Loaded checkpoint from {path} ({model.count_parameters():,} params)")
     return model
 
 
-def load_tokenizer_for(model) -> AgentTokenizer:
-    """Return a tokenizer restricted to this model's vocabulary.
+def load_tokenizer_for(model):
+    """Return the tokenizer this checkpoint was trained with.
 
-    Always use this instead of the module-level default when the checkpoint may
-    predate the chat tokens; otherwise the tokenizer can emit ids the model has
-    no embedding row for.
+    A checkpoint that records ``config["tokenizer"]`` gets exactly that
+    (the BPE file is also copied next to the weights). One that predates the
+    key is a byte-level checkpoint, restricted to its own vocabulary so the
+    tokenizer cannot emit ids the model has no embedding row for.
     """
+    spec = getattr(model, "tokenizer_spec", None)
+    if spec:
+        from agent.tokenizer_registry import load_tokenizer
+        return load_tokenizer(spec, getattr(model, "checkpoint_dir", None))
     size = getattr(model, "vocab_size", DEFAULT_AGENT_TOKENIZER.vocab_size)
     if size == DEFAULT_AGENT_TOKENIZER.vocab_size:
         return DEFAULT_AGENT_TOKENIZER

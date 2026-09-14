@@ -27,7 +27,7 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1,
                  use_rope: bool = False, max_len: int = 32768,
                  arch_version: int = 2, n_kv_heads: int = None,
-                 qk_norm: bool = True):
+                 qk_norm: bool = True, rope_base: float = 10000.0):
         super().__init__()
         assert d_model % n_heads == 0
         self.d_model = d_model
@@ -46,18 +46,24 @@ class MultiHeadAttention(nn.Module):
         self.n_rep = self.n_heads // self.n_kv_heads
         kv_dim = self.n_kv_heads * self.d_k
 
-        self.W_q = nn.Linear(d_model, d_model)
-        self.W_k = nn.Linear(d_model, kv_dim)
-        self.W_v = nn.Linear(d_model, kv_dim)
-        self.W_o = nn.Linear(d_model, d_model)
+        # v3 drops the projection biases: Qwen3 has none, and a bias-free
+        # attention block exports to GGUF as a plain tensor copy.
+        bias = arch_version < 3
+        self.W_q = nn.Linear(d_model, d_model, bias=bias)
+        self.W_k = nn.Linear(d_model, kv_dim, bias=bias)
+        self.W_v = nn.Linear(d_model, kv_dim, bias=bias)
+        self.W_o = nn.Linear(d_model, d_model, bias=bias)
         self.dropout = nn.Dropout(dropout)
 
         self.qk_norm = qk_norm and arch_version >= 2
         if self.qk_norm:
             self.q_norm = RMSNorm(self.d_k)
             self.k_norm = RMSNorm(self.d_k)
+        # v2 pairs adjacent dims; v3 pairs halves (llama.cpp NEOX layout).
+        self.rope_interleaved = arch_version < 3
         if self.use_rope:
-            self.rope = RoPECache(self.d_k, max_len)
+            self.rope = RoPECache(self.d_k, max_len, base=rope_base,
+                                  interleaved=self.rope_interleaved)
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                 mask: torch.Tensor = None, cache: dict = None) -> torch.Tensor:
@@ -89,7 +95,7 @@ class MultiHeadAttention(nn.Module):
         if self.use_rope:
             cos, sin = self.rope.get(seq_len, offset=offset,
                                      device=q.device, dtype=q.dtype)
-            q, k = apply_rope(q, k, cos, sin)
+            q, k = apply_rope(q, k, cos, sin, interleaved=self.rope_interleaved)
 
         if cache is not None:
             if "k" in cache:

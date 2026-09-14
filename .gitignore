@@ -30,3 +30,7 @@ newllm/
 # Timestamped copies made before a destructive pool regeneration; the live pool
 # is tracked, so these are duplicates.
 data/*.backup*.json
+
+# Generated artifacts of the tokenizer/export pipeline
+data/corpus/
+*.gguf

@@ -26,7 +26,7 @@ from torch.utils.data import random_split
 
 from agent.dataset import AgentDataset
 from agent.dataset_builder import build as build_dataset, PrebuiltDataset
-from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
+from agent.tokenizer_registry import load_tokenizer, spec_for
 from model.transformer import Transformer
 from training.trainer import Trainer
 from training.device_utils import get_best_device
@@ -36,6 +36,22 @@ PRESETS = {
     "M": dict(d_model=768, n_layers=12, n_heads=12, d_ff=3072),
     "L": dict(d_model=1024, n_layers=12, n_heads=16, d_ff=4096),
     "XL": dict(d_model=2048, n_layers=20, n_heads=16, d_ff=8192),
+    # Mixture-of-experts presets (arch_version=3, qwen3moe layout). Measured
+    # at the mean BPE trace length, batch 2, grad checkpointing:
+    #   L-moe        464M total / 152M active   292 ms/step   7.1 GiB
+    #   deep-moe-20  561M total / 172M active   516 ms/step   8.7 GiB
+    #   deep-moe-24  671M total / 204M active   632 ms/step  10.4 GiB
+    # The Python expert loop is ~3.4x a dense step at equal active params;
+    # depth is what buys multi-step composition (our L is 12 layers where
+    # comparable models use 24-30).
+    "S-moe": dict(d_model=512, n_layers=8, n_heads=8, d_ff=1024,
+                  use_moe=True, num_experts=4, top_k=2),
+    "L-moe": dict(d_model=1024, n_layers=12, n_heads=16, d_ff=2048,
+                  use_moe=True, num_experts=8, top_k=2),
+    "deep-moe-20": dict(d_model=768, n_layers=20, n_heads=12, d_ff=2048,
+                        use_moe=True, num_experts=8, top_k=2),
+    "deep-moe-24": dict(d_model=768, n_layers=24, n_heads=12, d_ff=2048,
+                        use_moe=True, num_experts=8, top_k=2),
 }
 # instruct was 768 when the fact KB held 12 short toy facts. With 682 generated
 # facts the keys are much longer, and three-tool chains overflowed 768 - which
@@ -142,10 +158,22 @@ def main():
     ap.add_argument("--val-batches", type=int, default=0,
                     help="limit the validation pass to N batches (0 = all); "
                          "a full pass over 12.5k samples costs minutes")
+    ap.add_argument("--tokenizer", default="byte",
+                    help="'byte' (legacy) or a path to an HF tokenizer.json")
+    ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
+                    help="wire format of the traces; default chatml for a BPE "
+                         "tokenizer, json for the byte tokenizer")
+    ap.add_argument("--arch-version", type=int, default=3)
+    ap.add_argument("--rope-base", type=float, default=None,
+                    help="default 1e6 for arch_version 3 (64k-ready), 1e4 before")
     ap.add_argument("--init-checkpoint", default=None,
                     help="warm-start from another checkpoint (e.g. train chat "
                          "from the finished instruct model)")
     args = ap.parse_args()
+    TOK = load_tokenizer(args.tokenizer)
+    tokenizer_spec = spec_for(TOK)
+    protocol = args.protocol or ("chatml" if tokenizer_spec["kind"] == "bpe" else "json")
+    rope_base = args.rope_base or (1e6 if args.arch_version >= 3 else 1e4)
 
     # torchrun sets these; absent means single-GPU.
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -179,7 +207,8 @@ def main():
         scenario_fraction=args.scenario_fraction,
         deep_fraction=args.deep_fraction, deep_min=args.deep_min,
         deep_max=args.deep_max, max_len=max_len, seed=args.seed,
-        workers=args.build_workers)
+        workers=args.build_workers, tokenizer_spec=tokenizer_spec,
+        protocol=protocol)
     if args.dataset_cache:
         if is_main:
             print(f"loading prebuilt dataset: {args.dataset_cache}", flush=True)
@@ -207,10 +236,17 @@ def main():
     cfg = PRESETS[args.size]
     model = Transformer(vocab_size=TOK.vocab_size, max_len=max_len,
                         dropout=0.1, use_rope=True, tie_weights=False,
-                        arch_version=2,
+                        arch_version=args.arch_version, rope_base=rope_base,
                         n_kv_heads=max(1, cfg["n_heads"] // 4),
                         qk_norm=True,
                         grad_checkpoint=args.grad_checkpoint, **cfg)
+    model.tokenizer_spec = tokenizer_spec
+    if is_main:
+        print(f"protocol {protocol}, tokenizer {tokenizer_spec}, "
+              f"arch_version {args.arch_version}, rope_base {rope_base:g}")
+        if tokenizer_spec["kind"] == "bpe":
+            import shutil
+            shutil.copy(tokenizer_spec["path"], os.path.join(out_dir, "tokenizer.json"))
     if is_main:
         print(f"model: {model.count_parameters():,} parameters, "
               f"vocab={TOK.vocab_size}, "
@@ -246,7 +282,10 @@ def main():
     # Accuracy on a held-out battery, scored during training. Only rank 0 runs
     # it; the other ranks would duplicate the work and interleave output.
     eval_fn = None
-    if args.eval_every and is_main:
+    if args.eval_every and protocol != "json" and is_main:
+        print("note: the in-training battery speaks the json protocol; "
+              "disabled for this run. Use scripts/run/04_eval.sh afterwards.")
+    if args.eval_every and protocol == "json" and is_main:
         from scripts.eval_agent import CASES, score as _score
         import contextlib, io
 
@@ -325,6 +364,8 @@ def main():
         "final_train_loss": sum(hist[-50:]) / 50,
         "minutes": dt / 60, "pool": args.pool,
         "vocab_size": TOK.vocab_size,
+        "tokenizer": tokenizer_spec, "protocol": protocol,
+        "arch_version": args.arch_version, "rope_base": rope_base,
     }
     json.dump(meta, open(os.path.join(out_dir, "run.json"), "w"), indent=1)
     if trainer.eval_history:

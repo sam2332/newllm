@@ -163,3 +163,78 @@ class TurnTracker:
         if full_value.startswith(seen):
             return full_value[len(seen):]
         return full_value
+
+
+class ChatMLTracker:
+    """Delta emitter for the Qwen3 template.
+
+    Every structural marker is a single special token, so the state machine
+    runs on token ids: ``<think>`` opens the thinking stream, ``</think>``
+    closes it, ``<tool_call>`` suspends deltas (the call is emitted whole at
+    the end), and any end-of-turn marker finishes. Newline runs are held back
+    until the next non-newline text so the template's ``\\n`` padding around
+    ``</think>`` and after it never reaches the client as content.
+    """
+
+    def __init__(self, tokenizer):
+        self.tok = tokenizer
+        sid = tokenizer.special_id
+        self._think, self._think_close = sid("<think>"), sid("</think>")
+        self._tool, self._tool_close = sid("<tool_call>"), sid("</tool_call>")
+        self._ends = {sid("<|im_end|>"), sid("<|im_start|>"), sid("<|endoftext|>")}
+        self.mode = "start"
+        self.kind = None
+        self.desynced = False
+        self.streamed = {"thinking": "", "content": ""}
+        self._hold = ""
+
+    def feed(self, token_id: int) -> list:
+        if self.mode == "done":
+            return []
+        if token_id == self._think:
+            self.mode, self._hold = "thinking", ""
+            return []
+        if token_id == self._think_close:
+            self.mode, self._hold = "after_think", ""
+            return []
+        if token_id == self._tool:
+            self.mode, self._hold, self.kind = "tool", "", "tool_call"
+            return []
+        if token_id == self._tool_close:
+            self.mode = "after_tool"
+            return []
+        if token_id in self._ends:
+            self.mode = "done"
+            return []
+        if self.mode in ("tool", "after_tool"):
+            return []
+        text = self.tok.decode([token_id])
+        if self.mode == "after_think":
+            if text.strip("\n") == "":
+                return []                      # the template's "\n\n" padding
+            self.mode = "content"
+        if self.mode == "start":
+            self.mode = "content"
+        stream = "thinking" if self.mode == "thinking" else "content"
+        # Mirror parse_assistant exactly: the thought is stripped of newlines,
+        # the content of all whitespace. Otherwise the streamed text and the
+        # final parsed value disagree by a leading space and the client sees
+        # the whole answer twice.
+        chars = "\n" if stream == "thinking" else None
+        combined = self._hold + text
+        if not self.streamed[stream]:
+            combined = combined.lstrip(chars)
+        emit = combined.rstrip(chars)
+        self._hold = combined[len(emit):]
+        if not emit:
+            return []
+        if stream == "content":
+            self.kind = self.kind or "response"
+        self.streamed[stream] += emit
+        return [(stream, emit)]
+
+    def remainder(self, stream: str, full_value: str) -> str:
+        seen = self.streamed.get(stream, "")
+        if full_value.startswith(seen):
+            return full_value[len(seen):]
+        return full_value

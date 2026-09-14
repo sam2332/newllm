@@ -23,7 +23,8 @@ class TransformerBlock(nn.Module):
                  max_len: int = 32768,
                  arch_version: int = 2,
                  n_kv_heads: int = None,
-                 qk_norm: bool = True):
+                 qk_norm: bool = True,
+                 rope_base: float = 10000.0):
         super().__init__()
         self.arch_version = arch_version
         if attention_type == "mla":
@@ -36,7 +37,8 @@ class TransformerBlock(nn.Module):
                                            use_rope=use_rope, max_len=max_len,
                                            arch_version=arch_version,
                                            n_kv_heads=n_kv_heads,
-                                           qk_norm=qk_norm)
+                                           qk_norm=qk_norm,
+                                           rope_base=rope_base)
 
         if use_moe:
             self.ff = MoELayer(d_model, d_ff, num_experts, top_k, dropout,

@@ -36,15 +36,15 @@ import torch
 
 from agent.agent_loop import run_agent, EOT
 from agent.chat import load_checkpoint, load_tokenizer_for
-from agent.ollama_context import (assemble_context, from_model_text,
-                                  system_texts_from_messages)
+from agent.ollama_context import (assemble_chatml_context, assemble_context,
+                                  from_model_text, system_texts_from_messages)
 from agent.ollama_format import (assistant_to_ollama, canonical_args,
                                  tool_call_id, toolbox_to_ollama_tools)
 from agent.repo_tools import attach_repo_tools
 from agent.tool_schema import schema_block_from_toolbox
 from agent.tools import Toolbox
-from agent.turn import (generate_turn, make_grammar, sampler_from_options,
-                        stream_turn)
+from agent.turn import (generate_turn, make_grammar, protocol_for,
+                        sampler_from_options, stream_turn)
 
 VERSION = "0.0.0-newllm"
 
@@ -57,6 +57,9 @@ class ServerState:
         self.model = load_checkpoint(checkpoint, device=device)
         self.load_ns = time.perf_counter_ns() - t0
         self.tokenizer = load_tokenizer_for(self.model)
+        # A BPE checkpoint speaks the Qwen3 template; a byte checkpoint the
+        # legacy JSON protocol. Everything downstream branches on this.
+        self.protocol = protocol_for(self.tokenizer)
         self.device = device
         self.name = model_name
         self.num_ctx = num_ctx
@@ -122,15 +125,23 @@ def _prepare(state, payload):
     num_predict = int(options.get("num_predict") or 0)
     max_new = num_predict if num_predict > 0 else state.max_new
     reserve = min(max_new, max(256, num_ctx // 4))
-    context, tokens, info = assemble_context(
-        messages, tools, num_ctx=num_ctx, reserve=reserve,
-        tokenizer=state.tokenizer, system_mode=state.system_mode,
-        thought_cache=state.thought_cache)
+    if state.protocol == "chatml":
+        context, tokens, info = assemble_chatml_context(
+            messages, tools, num_ctx=num_ctx, reserve=reserve,
+            tokenizer=state.tokenizer, enable_thinking=payload.get("think"))
+    else:
+        context, tokens, info = assemble_context(
+            messages, tools, num_ctx=num_ctx, reserve=reserve,
+            tokenizer=state.tokenizer, system_mode=state.system_mode,
+            thought_cache=state.thought_cache)
     allowed = [t.get("function", t).get("name") for t in tools
                if isinstance(t, dict)] if tools else None
     allowed = [n for n in allowed if n] if allowed else None
     stop = [s for s in (options.get("stop") or []) if isinstance(s, str)]
-    stop_texts = tuple([EOT] + [s.encode("utf-8").decode("latin-1") for s in stop])
+    if state.protocol == "chatml":
+        stop_texts = tuple(stop)          # unicode-native tokenizer
+    else:
+        stop_texts = tuple([EOT] + [s.encode("utf-8").decode("latin-1") for s in stop])
     if state.log_context:
         print(f"--- context ({info['prompt_tokens']} tokens, "
               f"dropped {info['dropped_turns']} turns) ---\n{context}---",
@@ -138,7 +149,8 @@ def _prepare(state, payload):
     return dict(context=context, tokens=tokens, info=info, allowed=allowed,
                 sampler=sampler_from_options(options), max_new=max_new,
                 stop_texts=stop_texts, seed=options.get("seed"),
-                grammar=make_grammar(state.tokenizer, allowed, state.constrained))
+                grammar=make_grammar(state.tokenizer, allowed, state.constrained,
+                                     state.protocol))
 
 
 def _envelope(state, payload, message, result=None, done=True, done_reason=None):
@@ -186,7 +198,8 @@ def chat_once(state, payload) -> dict:
                                tokenizer=state.tokenizer, device=state.device,
                                max_new=p["max_new"], stop_texts=p["stop_texts"],
                                grammar=p["grammar"], seed=p["seed"],
-                               allowed_names=p["allowed"])
+                               allowed_names=p["allowed"],
+                               protocol=state.protocol)
     env = _envelope(state, payload, _message_from_result(state, result), result)
     env.update(_diagnostic(result))
     return env
@@ -201,7 +214,8 @@ def chat_stream(state, payload):
                               tokenizer=state.tokenizer, device=state.device,
                               max_new=p["max_new"], stop_texts=p["stop_texts"],
                               grammar=p["grammar"], seed=p["seed"],
-                              allowed_names=p["allowed"]):
+                              allowed_names=p["allowed"],
+                              protocol=state.protocol):
             if ev.type == "content":
                 yield {"model": model_name, "created_at": _now(), "done": False,
                        "message": {"role": "assistant", "content": ev.text}}
@@ -569,7 +583,7 @@ def main():
         print("builtin tools:",
               [t["function"]["name"] for t in toolbox_to_ollama_tools(state.toolbox)])
     print(f"model {state.name} ({state.params:,} params, vocab "
-          f"{state.tokenizer.vocab_size}) on {state.device}")
+          f"{state.tokenizer.vocab_size}, protocol {state.protocol}) on {state.device}")
     print(f"Ollama-compatible API on http://{args.host}:{args.port}  "
           f"(num_ctx {state.num_ctx}, max_new {state.max_new})", flush=True)
     make_server(args.host, args.port, state).serve_forever()
