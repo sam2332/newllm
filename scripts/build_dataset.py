@@ -61,7 +61,7 @@ def main():
                     help="fraction of traces drawn from the knowledge library "
                          "(python, bash, science, coding principles)")
     ap.add_argument("--knowledge",
-                    default="data/knowledge.json,data/knowledge_b.json",
+                    default="data/knowledge.json,data/knowledge_b.json,data/knowledge_c.json",
                     help="one path or a comma-separated list")
     ap.add_argument("--knowledge-explain-fraction", type=float, default=0.5,
                     help="of the knowledge slice, the share that is pure Q&A "

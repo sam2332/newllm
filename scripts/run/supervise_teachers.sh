@@ -14,5 +14,9 @@ while true; do
     echo "$(date +%H:%M:%S) teacher B down, restarting" >> logs/supervise.log
     bash scripts/run/launch_teacher_b.sh >> logs/supervise.log 2>&1
   fi
+  if ! pgrep -f "out data/knowledge_c.json" > /dev/null; then
+    echo "$(date +%H:%M:%S) teacher C down, restarting" >> logs/supervise.log
+    bash scripts/run/launch_teacher_c.sh >> logs/supervise.log 2>&1
+  fi
   sleep 60
 done

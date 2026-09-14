@@ -44,7 +44,7 @@ def main():
     # tool traces; leaving them out of the tokenizer corpus wastes merges.
     ap.add_argument("--knowledge-fraction", type=float, default=0.2)
     ap.add_argument("--knowledge",
-                    default="data/knowledge.json,data/knowledge_b.json")
+                    default="data/knowledge.json,data/knowledge_b.json,data/knowledge_c.json")
     ap.add_argument("--persona-fraction", type=float, default=0.2)
     ap.add_argument("--personas", default="data/personas.json")
     ap.add_argument("--format-fraction", type=float, default=0.15)

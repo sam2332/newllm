@@ -6,3 +6,4 @@
 cd /home/lmeadows/llm
 bash scripts/run/launch_teacher_a.sh
 bash scripts/run/launch_teacher_b.sh
+bash scripts/run/launch_teacher_c.sh
