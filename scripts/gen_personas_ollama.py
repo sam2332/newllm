@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
-from scripts.gen_data_ollama import ENDPOINTS, extract_json_array, ollama_chat
+from scripts.gen_data_ollama import ENDPOINTS, ollama_chat, parse_json_array
 
 SEEDS = [
     "gruff starship engineer", "cheerful medieval baker", "hard-boiled noir detective",
@@ -55,6 +55,8 @@ No markdown, no commentary, JSON only."""
 def valid(p: dict) -> bool:
     if not isinstance(p, dict):
         return False
+    if isinstance(p.get("voice"), list):
+        p["voice"] = ", ".join(str(v) for v in p["voice"])
     wr = [w for w in p.get("wrappers", []) if isinstance(w, str)
           and w.count("{answer}") == 1 and 8 < len(w) < 160]
     if len(wr) < 5 or not isinstance(p.get("name"), str) or not p["name"].strip():
@@ -92,7 +94,7 @@ def main():
         for done, fut in enumerate(as_completed(futs), 1):
             seed = futs[fut]
             try:
-                arr = extract_json_array(fut.result())
+                arr = parse_json_array(fut.result())
             except Exception as exc:                            # noqa: BLE001
                 errors += 1
                 print(f"  [{done}/{len(jobs)}] {seed}: {type(exc).__name__}: {exc}"[:90])

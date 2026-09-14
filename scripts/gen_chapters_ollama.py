@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
-from scripts.gen_data_ollama import ENDPOINTS, extract_json_array, ollama_chat
+from scripts.gen_data_ollama import ENDPOINTS, ollama_chat, parse_json_array
 
 GENRES = ["space opera", "cozy mystery", "epic fantasy", "hard science fiction",
           "gothic horror", "heist thriller", "coming-of-age", "post-apocalyptic survival",
@@ -49,7 +49,7 @@ def gen_outlines(model, genre, n, chapters, endpoint):
     text = ollama_chat(OUTLINE_PROMPT.format(n=n, genre=genre, chapters=chapters),
                        model, endpoint, temperature=1.0, timeout=600, num_predict=4096)
     out = []
-    for s in extract_json_array(text) or []:
+    for s in parse_json_array(text) or []:
         if not isinstance(s, dict) or not isinstance(s.get("chapters"), list):
             continue
         chs = [c for c in s["chapters"] if isinstance(c, dict)

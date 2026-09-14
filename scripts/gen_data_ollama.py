@@ -51,6 +51,20 @@ def ollama_chat(prompt: str, model: str, endpoint: str,
     return data.get("message", {}).get("content", "")
 
 
+def parse_json_array(text: str):
+    """Strict first: the outermost [...] as JSON. Compact, nested output from
+    the teacher (lists inside objects) is valid JSON that the line-by-line
+    fallback in extract_json_array cannot reassemble."""
+    try:
+        start, end = text.index("["), text.rindex("]") + 1
+        arr = json.loads(text[start:end])
+        if isinstance(arr, list):
+            return arr
+    except (ValueError, json.JSONDecodeError):
+        pass
+    return extract_json_array(text)
+
+
 def extract_json_array(text: str):
     """Pull the first JSON array out of a model response.
 

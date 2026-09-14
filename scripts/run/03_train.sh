@@ -37,6 +37,11 @@ SAVE_EVERY=${SAVE_EVERY:-500}
 CACHE=${CACHE:-}
 MAX_MINUTES=${MAX_MINUTES:-0}
 RESUME=${RESUME:-0}
+# Retrain pipeline. The tokenizer must be the one the cache was built with
+# (the cache's .json sidecar records it); arch 3 exports to GGUF.
+TOKENIZER=${TOKENIZER:-byte}
+ARCH_VERSION=${ARCH_VERSION:-3}
+ROPE_BASE=${ROPE_BASE:-}
 
 if [ -z "$CACHE" ]; then
   CACHE=$(ls -S data/cache/instruct_*.pt 2>/dev/null | head -1 || true)
@@ -51,7 +56,9 @@ args=(--mode instruct --size "$SIZE" --dataset-cache "$CACHE"
       --max-len "$MAX_LEN" --batch-size "$BATCH" --grad-accum "$ACCUM"
       --grad-checkpoint --iters "$ITERS" --lr "$LR"
       --val-batches "$VAL_BATCHES" --eval-every "$EVAL_EVERY"
-      --eval-patience "$EVAL_PATIENCE" --save-every "$SAVE_EVERY" --out "$OUT")
+      --eval-patience "$EVAL_PATIENCE" --save-every "$SAVE_EVERY" --out "$OUT"
+      --tokenizer "$TOKENIZER" --arch-version "$ARCH_VERSION")
+[ -n "$ROPE_BASE" ] && args+=(--rope-base "$ROPE_BASE")
 [ "$MAX_MINUTES" != "0" ] && args+=(--max-minutes "$MAX_MINUTES")
 [ "$RESUME" = "1" ] && args+=(--resume)
 

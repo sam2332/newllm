@@ -75,6 +75,44 @@ SEGMENT=15 scripts/run/03_train_segmented.sh
 N=300 BATTERY=0 scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt
 ```
 
+## The retrain pipeline (ChatML + BPE + MoE, exports to GGUF)
+
+The current checkpoints speak a bespoke byte-level protocol that only this
+repo can serve. The retrain produces a model that loads natively in Ollama.
+Every step below has been run end to end on a smoke model
+(`scripts/test_export_gguf.py` proved the export is the same model).
+
+```bash
+scripts/run/01b_gen_library.sh                  # personas + chapter library (teacher, hours, both GPUs)
+.venv/bin/python scripts/dump_corpus.py --samples 40000 --out data/corpus/traces.txt
+.venv/bin/python scripts/train_tokenizer.py --corpus data/corpus/traces.txt --vocab 8192 16384
+TOKENIZER=data/tokenizer/bpe8192.json PROJECT_FRACTION=0.25 PERSONA_FRACTION=0.2 \
+  FORMAT_FRACTION=0.15 MAX_LEN=32768 SAMPLES=300000 scripts/run/02_build_dataset.sh
+TOKENIZER=data/tokenizer/bpe8192.json SIZE=deep-moe-20 OUT=checkpoints_moe ITERS=120000 \
+  scripts/run/03_train.sh
+scripts/run/04_eval.sh checkpoints_moe/agent_best.pt        # held-out tool traces
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/eval_system.py checkpoints_moe/agent_best.pt --judge
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/eval_longhorizon.py checkpoints_moe/agent_best.pt
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/needle_test.py checkpoints_moe/agent_best.pt
+scripts/run/05_export.sh checkpoints_moe/agent_best.pt      # GGUF -> docker Ollama, equivalence test
+```
+
+Rules that follow from how the pieces fit:
+
+- **The tokenizer is part of the cache key.** A cache built with one tokenizer
+  cannot be trained with another; `03_train.sh` must get the same `TOKENIZER`
+  the build did (the cache's `.json` sidecar records it).
+- **A BPE tokenizer implies the ChatML protocol** and `arch_version=3`; the
+  server and evals pick the protocol from the checkpoint automatically.
+- **The teacher owns both GPUs while it runs** (~30 GB each). Nothing else fits
+  on the 5090 until `01b` finishes.
+- **Two stories per outline request.** Five overflowed the token budget and
+  the truncated JSON was silently dropped - it looked like the teacher was
+  producing nothing.
+- The MoE step time is dominated by the Python loop over experts (~3.4x a
+  dense step at equal active parameters); `deep-moe-20` is ~516 ms/step at
+  the mean trace length.
+
 ## Choosing settings
 
 **Train longer than feels necessary.** At 12,000 iterations the model had seen
