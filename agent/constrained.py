@@ -41,12 +41,26 @@ S_DONE = "done"
 class AssistantGrammar:
     """Tracks grammar state and produces an allowed-token mask per step."""
 
-    def __init__(self, tool_names, tokenizer: AgentTokenizer = DEFAULT_AGENT_TOKENIZER):
+    def __init__(self, tool_names, tokenizer: AgentTokenizer = DEFAULT_AGENT_TOKENIZER,
+                 allow_tool_call: bool = True):
         self.tok = tokenizer
         self.vocab = tokenizer.vocab_size
         self.tool_names = sorted(tool_names)
+        # A request that offers no tools must get a "response" turn; with an
+        # empty name list the S_IN_NAME state would otherwise admit only the
+        # closing quote and force an empty tool name.
+        self.allow_tool_call = allow_tool_call and bool(self.tool_names)
         self.sid = {t: tokenizer.encode(t)[0] for t in tokenizer.SPECIAL_TOKENS}
         self.reset()
+
+    def accepts(self, token_id: int) -> bool:
+        """Whether ``token_id`` is admissible in the current state.
+
+        Lets the grammar run as a passive tracker over tokens it did not mask:
+        a server streaming an unconstrained model uses this to know when the
+        output has left the grammar and deltas can no longer be trusted.
+        """
+        return token_id in self.allowed()
 
     def reset(self):
         self.state = S_OPEN
@@ -79,6 +93,8 @@ class AssistantGrammar:
         if s == S_AFTER_THOUGHT:
             return [self._byte(",")]
         if s == S_ACTION_KEY:
+            if not self.allow_tool_call:
+                return [self.sid['"response":']]
             return [self.sid['"tool_call":'], self.sid['"response":']]
         if s == S_TC_LBRACE:
             return [self._byte("{")]

@@ -156,9 +156,18 @@ class ToolSchemaSampler:
             })
         # Shuffle so position carries no information either.
         self.rng.shuffle(entries)
-        block = "<system>" + json.dumps({"tools": entries},
-                                        separators=(",", ":")) + "</system>"
-        return mapping, block
+        return mapping, _schema_block(entries)
+
+
+def _schema_block(entries: list) -> str:
+    """The one place the schema block is formatted.
+
+    Training, the live Toolbox and client-supplied Ollama tools all go through
+    here, so the minified JSON the model was trained on and the JSON it is
+    served cannot drift apart.
+    """
+    return "<system>" + json.dumps({"tools": entries},
+                                   separators=(",", ":")) + "</system>"
 
 
 def schema_block_from_toolbox(toolbox) -> str:
@@ -170,8 +179,32 @@ def schema_block_from_toolbox(toolbox) -> str:
         entries.append({"name": name,
                         "description": spec["description"],
                         "parameters": spec["parameters"]})
-    return "<system>" + json.dumps({"tools": entries},
-                                   separators=(",", ":")) + "</system>"
+    return _schema_block(entries)
+
+
+def schema_block_from_tools(tools: list) -> str:
+    """Build the system block from Ollama/OpenAI-shaped client tools.
+
+    Each entry is ``{"type": "function", "function": {"name", "description",
+    "parameters"}}``. Entries without a name are skipped; a missing description
+    becomes "" and missing parameters become an empty object schema, so a
+    sloppy client still gets a block the model can read. Returns "" when there
+    are no usable tools - a trace with no tool use carries no schema block, so
+    emitting an empty one would be a form the model has never seen.
+    """
+    entries = []
+    for tool in tools or []:
+        fn = tool.get("function", tool) if isinstance(tool, dict) else {}
+        name = fn.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        params = fn.get("parameters")
+        if not isinstance(params, dict):
+            params = {"type": "object", "properties": {}}
+        entries.append({"name": name,
+                        "description": str(fn.get("description") or ""),
+                        "parameters": params})
+    return _schema_block(entries) if entries else ""
 
 
 def randomize_trace(text: str, rng: random.Random,

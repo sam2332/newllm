@@ -24,3 +24,9 @@ seaborn
 # Development
 pytest
 black
+
+# Development: the official client, used by scripts/test_ollama_client.py
+ollama>=0.6
+tokenizers>=0.21
+gguf>=0.17
+jinja2>=3.1

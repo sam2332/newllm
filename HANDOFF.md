@@ -23,7 +23,7 @@ roleplay**, usable from Ollama.
 | chat | **never trained.** Pipeline and eval are ready and unused |
 | roleplay | **does not exist.** No data, no eval, no format decision |
 | smallest viable size | **never tested.** Every number here is the M preset |
-| Ollama | proxy works (`serve_ollama_compat.py`). Native GGUF not attempted |
+| Ollama | proxy works (`serve_ollama.py`). Native GGUF not attempted |
 
 Best checkpoint: `checkpoints_long_M/agent_best.pt` (40,000 iters, val 0.0434).
 
@@ -299,21 +299,50 @@ Arguments for switching: **3x fewer tokens** (mean trace 2,328 -> 772, `max_len`
 straining context. Argument against: it invalidates every checkpoint and breaks
 the append-only tokenizer guarantee.
 
-### Ollama: native GGUF vs proxy
+### Ollama: the server works today; native GGUF is the next track
 
-**Decided: a proxy is acceptable.** `scripts/serve_ollama_compat.py` already
-serves `/api/chat`, `/api/tags` and `/api/show`, so any Ollama client works
-today. Native GGUF remains the stretch goal.
+`scripts/serve_ollama.py` is a real Ollama server, not a shim. Standard
+semantics: the client defines tools, one `/api/chat` call yields one assistant
+turn (`tool_calls` or content), the client executes and sends `role: "tool"`
+back. Implements `/api/chat` (NDJSON streaming, `options`, `num_ctx`,
+`num_predict`, `stop`, `seed`), `/api/generate`, `/api/tags`, `/api/show`,
+`/api/ps`, `/api/version`, `/` health, and `/v1/chat/completions` + `/v1/models`
+(OpenAI shape, SSE). A client system prompt is placed **after** the tool-schema
+block, never in its place. Context truncation keeps the system head and drops
+whole turns oldest-first.
 
-This matters because it **removes the hard requirement to change the tokenizer**.
-llama.cpp only understands GPT-2-style BPE, SentencePiece or WordPiece, and the
-custom byte-plus-atomic-strings scheme is none of them - so native loading would
-force BPE. With a proxy accepted, BPE becomes an optimization justified by speed
-and response length instead of a prerequisite.
+The single-turn generator is `agent/turn.py:generate_turn` / `stream_turn`,
+built on `agent/generate.py:generate_tokens` and `agent/ollama_context.py`.
+Every future eval should go through it, so what is measured is what is served.
 
-If native loading is attempted later, the architecture is the easy half: RMSNorm
-+ RoPE + SwiGLU + GQA + QK-Norm, no biases, pre-norm is essentially Qwen3, which
-llama.cpp supports. Verify against the real converter rather than assuming.
+Verified with the official `ollama` Python package
+(`scripts/test_ollama_client.py`, 12 hard checks): list/show parse, the full
+tool loop with a name NOT in any training pool (`evaluate_sum`), streaming
+chunks agree with non-streaming, `num_predict` exhaustion is a 200 with
+`done_reason: "length"`, unknown model is a 404 `ResponseError`, OpenAI endpoint
+returns `tool_calls`.
+
+**Grammar-constrained decoding is on by default** (`--no-constrained` to turn
+it off). On this checkpoint it is the difference between 12/12 and 11/12:
+unconstrained, the model emits a memorized pool name (`evaluate_math`, `op_42`)
+for a tool the schema calls `evaluate_sum` - the same hop-0 failure
+`diag_deep_chains.py` found. On held-out traces it was only worth +2/100 because
+those traces use pool names; for a client's *novel* names it is decisive.
+
+Two model gaps the e2e exposed, both for Track B's data, not the server:
+- **Parameter names were never randomized.** Every calc-like tool in training
+  takes `expr`, so given `add_numbers(a, b)` the model emits
+  `add_numbers({"expr": "12 + 8"})` - right name (forced), wrong argument shape.
+  `agent/tool_schema.py` must randomize parameter names and descriptions the
+  way it randomizes tool names.
+- **No tools + a chatty prompt produces junk** (`Say hello.` -> garbage). Traces
+  with no tool use are rare and chat has never been trained.
+
+Native GGUF loading is Track C of the approved plan: retrain on the Qwen3 chat
+template with a GPT-2-style BPE (Qwen2 pre-tokenizer regex) so the model loads
+with a standard Modelfile. The architecture is already Qwen3-isomorphic except
+four small deltas (attention biases, interleaved RoPE, embedding scale, MoE
+router bias), which become `arch_version=3`.
 
 ### Context length is now dynamic
 
@@ -345,7 +374,7 @@ characters, about **484 words**. With BPE at 3.01x it is ~9,030 characters, abou
 **1,456 words**, in the same 38 seconds of decode.
 
 Generation caps are now 4,096 everywhere (`run_agent`, `agent/chat.py`,
-`serve_ollama_compat.py`). `max_new` is a ceiling, not a target - generation
+`serve_ollama.py`). `max_new` is a ceiling, not a target - generation
 stops at `</assistant>`, so an ordinary tool call still costs the ~100 tokens it
 needs. The tradeoff is the worst case: a model that never emits a closing tag
 now burns 4,096 tokens, ~51 s at the measured ~80 tok/s, instead of 120.

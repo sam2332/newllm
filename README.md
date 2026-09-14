@@ -40,12 +40,36 @@ are what they are.
 
 ```bash
 .venv/bin/python -m agent.chat --mode chat
-.venv/bin/python scripts/serve_ollama_compat.py \
+.venv/bin/python scripts/serve_ollama.py \
     --checkpoint checkpoints_long_M/agent_best.pt --port 11500
 ```
 
-The second serves `/api/chat`, `/api/tags` and `/api/show`, so any Ollama client
-can point at it. Native GGUF loading is a stretch goal, not done.
+The second is an Ollama server with standard semantics: you define the tools,
+the model returns `tool_calls`, you execute them and send back `role: "tool"`.
+The official client works unmodified:
+
+```python
+import ollama
+client = ollama.Client(host="http://127.0.0.1:11500")
+tools = [{"type": "function", "function": {
+    "name": "add_numbers", "description": "Add two integers.",
+    "parameters": {"type": "object", "properties": {
+        "a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"]}}}]
+messages = [{"role": "system", "content": "You are Zed."},
+            {"role": "user", "content": "What is 12 + 8?"}]
+r = client.chat(model="newllm-agent", messages=messages, tools=tools)
+for call in r.message.tool_calls or []:
+    args = call.function.arguments
+    messages += [r.message, {"role": "tool", "tool_name": call.function.name,
+                             "content": str(args["a"] + args["b"])}]
+    r = client.chat(model="newllm-agent", messages=messages, tools=tools)
+print(r.message.content)
+```
+
+`OLLAMA_HOST=http://127.0.0.1:11500 ollama run newllm-agent` and OpenAI clients
+pointed at `http://127.0.0.1:11500/v1` work too. `stream=True` returns NDJSON
+deltas. Verify all of it with `scripts/test_ollama_client.py`. Native GGUF
+loading is the next track, not done.
 
 ### Verify the build
 

@@ -45,7 +45,7 @@ A run is 89 minutes, so this is cheap to answer.
 
 ## Constraints that shape the work
 
-- **Ollama-usable.** A proxy is acceptable (`serve_ollama_compat.py` already
+- **Ollama-usable.** A proxy is acceptable (`serve_ollama.py` already
   works), so native GGUF is a stretch goal rather than a requirement. This is why
   the tokenizer is still an open decision instead of a forced one.
 - **Responses up to ~3,000 tokens.** Current generation caps are 120-400.

@@ -30,14 +30,30 @@ Mapping
 is lost in a round trip.
 """
 
+import hashlib
 import json
 
 FINISH_TOOL = "finish"
 
 
+def canonical_args(arguments) -> str:
+    """Stable key for a tool call's arguments (used for ids and caches)."""
+    try:
+        return json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(arguments)
+
+
+def tool_call_id(name: str, arguments) -> str:
+    """Deterministic ``call_xxxxxxxx`` id, so tests can predict it."""
+    digest = hashlib.sha1((name + canonical_args(arguments)).encode()).hexdigest()
+    return "call_" + digest[:8]
+
+
 # --------------------------------------------------------- internal -> ollama
 
-def assistant_to_ollama(internal: dict, include_thinking: bool = True) -> dict:
+def assistant_to_ollama(internal: dict, include_thinking: bool = True,
+                        call_index: int = 0) -> dict:
     """Convert one internal assistant message to an Ollama chat message."""
     msg = {"role": "assistant", "content": ""}
     if include_thinking and isinstance(internal.get("thought"), str):
@@ -45,16 +61,35 @@ def assistant_to_ollama(internal: dict, include_thinking: bool = True) -> dict:
 
     if isinstance(internal.get("tool_call"), dict):
         call = internal["tool_call"]
+        name = call.get("name", "")
+        args = call.get("arguments", {})
         msg["tool_calls"] = [{
+            "id": tool_call_id(name, args),
             "function": {
-                "name": call.get("name", ""),
+                "index": call_index,
+                "name": name,
                 # Ollama takes a real object here, not a JSON string.
-                "arguments": call.get("arguments", {}),
+                "arguments": args,
             }
         }]
     else:
         msg["content"] = internal.get("response", "")
     return msg
+
+
+def tools_from_ollama(tools: list) -> list:
+    """Client tools -> ``[{"name", "description", "parameters"}]`` entries."""
+    out = []
+    for tool in tools or []:
+        fn = tool.get("function", tool) if isinstance(tool, dict) else {}
+        name = fn.get("name")
+        if isinstance(name, str) and name:
+            out.append({"name": name,
+                        "description": str(fn.get("description") or ""),
+                        "parameters": fn.get("parameters")
+                        if isinstance(fn.get("parameters"), dict)
+                        else {"type": "object", "properties": {}}})
+    return out
 
 
 def tool_result_to_ollama(name: str, content: str) -> dict:
@@ -79,34 +114,47 @@ def toolbox_to_ollama_tools(toolbox) -> list:
 
 # --------------------------------------------------------- ollama -> internal
 
-def assistant_from_ollama(msg: dict) -> dict:
-    """Convert an Ollama assistant message to the internal contract.
+def _parse_args(args):
+    # OpenAI-style servers may still hand back a JSON string here.
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError:
+            args = {}
+    return args if isinstance(args, dict) else {}
 
-    Always returns a dict with a string ``thought`` and exactly one of
-    ``tool_call`` or ``response``, which is what the internal validator
-    requires.
+
+def assistants_from_ollama(msg: dict, thought_cache=None) -> list:
+    """Convert an Ollama assistant message to one internal message per call.
+
+    The model's protocol is one tool call per assistant turn, so a message
+    carrying several ``tool_calls`` (from another model's history) becomes
+    several internal turns. The ``thought`` is recovered in this order: the
+    message's ``thinking``, then a cache of thoughts the server emitted for
+    the same (name, arguments) - the official client echoes ``thinking``
+    back, but many clients strip it - then a neutral default.
     """
     thought = msg.get("thinking") or ""
     calls = msg.get("tool_calls") or []
-    if calls:
-        fn = calls[0].get("function", {})
-        args = fn.get("arguments", {})
-        # OpenAI-style servers may still hand back a JSON string here.
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except json.JSONDecodeError:
-                args = {}
-        if not isinstance(args, dict):
-            args = {}
-        return {
-            "thought": thought or f"Calling {fn.get('name', '')}.",
-            "tool_call": {"name": fn.get("name", ""), "arguments": args},
-        }
-    return {
-        "thought": thought or "Answering directly.",
-        "response": msg.get("content", "") or "",
-    }
+    if not calls:
+        return [{"thought": thought or "Answering directly.",
+                 "response": msg.get("content", "") or ""}]
+    out = []
+    for call in calls:
+        fn = call.get("function", {}) if isinstance(call, dict) else {}
+        name = fn.get("name", "") or ""
+        args = _parse_args(fn.get("arguments", {}))
+        cached = None
+        if thought_cache is not None:
+            cached = thought_cache.get((name, canonical_args(args)))
+        out.append({"thought": thought or cached or f"Calling {name}.",
+                    "tool_call": {"name": name, "arguments": args}})
+    return out
+
+
+def assistant_from_ollama(msg: dict) -> dict:
+    """First internal message for an Ollama assistant message (see above)."""
+    return assistants_from_ollama(msg)[0]
 
 
 def messages_from_ollama(messages: list) -> list:
@@ -123,9 +171,10 @@ def messages_from_ollama(messages: list) -> list:
                         "name": m.get("tool_name") or m.get("name", ""),
                         "content": m.get("content", "")})
         elif role == "assistant":
-            internal = assistant_from_ollama(m)
-            out.append({"role": "assistant",
-                        "content": json.dumps(internal, separators=(",", ":"))})
+            for internal in assistants_from_ollama(m):
+                out.append({"role": "assistant",
+                            "content": json.dumps(internal,
+                                                  separators=(",", ":"))})
     return out
 
 
@@ -144,16 +193,3 @@ def messages_to_ollama(messages: list) -> list:
             internal = json.loads(content) if isinstance(content, str) else content
             out.append(assistant_to_ollama(internal))
     return out
-
-
-def run_result_to_ollama(result: dict) -> dict:
-    """Render a ``run_agent`` result as a single Ollama /api/chat response."""
-    return {
-        "message": {
-            "role": "assistant",
-            "content": result.get("final_answer", ""),
-            "thinking": result.get("thinking", ""),
-        },
-        "done": True,
-        "done_reason": "stop",
-    }
