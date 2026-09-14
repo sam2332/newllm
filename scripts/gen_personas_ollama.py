@@ -102,12 +102,18 @@ def main():
     ap.add_argument("--rounds", type=int, default=1, help="repeat every seed N times")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--out", default="data/personas.json")
+    ap.add_argument("--endpoint", action="append", default=None,
+                    help="explicit Ollama URL, repeatable. Overrides "
+                         "--endpoints. Use this to choose WHICH GPU: the "
+                         "containers both have NVIDIA_VISIBLE_DEVICES=all, so "
+                         "their names say nothing about where a model lands - "
+                         "Ollama picks the card with the most free VRAM.")
     ap.add_argument("--endpoints", type=int, default=len(ENDPOINTS),
                     help="how many Ollama endpoints to use; 1 keeps the second "
                          "GPU idle, which is the configuration that has "
                          "survived long runs on this machine")
     args = ap.parse_args()
-    endpoints = ENDPOINTS[:max(1, args.endpoints)]
+    endpoints = args.endpoint or ENDPOINTS[:max(1, args.endpoints)]
 
     existing = json.load(open(args.out)) if os.path.exists(args.out) else []
     have = {p["name"].lower() for p in existing}
