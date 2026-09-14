@@ -44,8 +44,10 @@ Write {lo}-{hi} characters of polished prose. Plain paragraphs only: no heading,
 
 
 def gen_outlines(model, genre, n, chapters, endpoint):
+    # Two stories per request: five overflowed the token budget and the
+    # truncated JSON was thrown away.
     text = ollama_chat(OUTLINE_PROMPT.format(n=n, genre=genre, chapters=chapters),
-                       model, endpoint, temperature=1.0, timeout=600)
+                       model, endpoint, temperature=1.0, timeout=600, num_predict=4096)
     out = []
     for s in extract_json_array(text) or []:
         if not isinstance(s, dict) or not isinstance(s.get("chapters"), list):
@@ -95,7 +97,7 @@ def main():
     t0 = time.time()
 
     # Pass 1: outlines, ~5 stories per request, genres round-robin.
-    per_req = 5
+    per_req = 2
     n_req = max(1, args.stories // per_req)
     stories = []
     with ThreadPoolExecutor(max_workers=args.workers) as ex:

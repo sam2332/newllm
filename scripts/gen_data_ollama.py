@@ -35,13 +35,14 @@ _counter = threading.local()
 
 
 def ollama_chat(prompt: str, model: str, endpoint: str,
-                temperature: float = 1.0, timeout: int = 300) -> str:
+                temperature: float = 1.0, timeout: int = 300,
+                num_predict: int = 2048) -> str:
     body = json.dumps({
         "model": model,
         "stream": False,
         "think": False,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": temperature, "num_predict": 2048},
+        "options": {"temperature": temperature, "num_predict": num_predict},
     }).encode()
     req = urlrequest.Request(f"{endpoint}/api/chat", data=body,
                              headers={"Content-Type": "application/json"})
