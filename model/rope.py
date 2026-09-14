@@ -22,11 +22,25 @@ class RoPECache(nn.Module):
         super().__init__()
         assert head_dim % 2 == 0, "RoPE needs an even head dimension"
         self.head_dim = head_dim
-        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))
-        positions = torch.arange(max_len).float()
-        angles = torch.einsum("i,j->ij", positions, inv_freq)  # (max_len, head_dim/2)
-        # Interleaved layout: matches ``rotate_half`` below, which pairs
-        # (x[0], x[1]), (x[2], x[3]), ... rather than splitting in halves.
+        self.base = base
+        self.register_buffer("inv_freq",
+                             1.0 / (base ** (torch.arange(0, head_dim, 2).float()
+                                             / head_dim)),
+                             persistent=False)
+        self._build(max_len)
+
+    def _build(self, length: int):
+        """(Re)build the cos/sin tables to cover ``length`` positions.
+
+        The tables are a pure function of position, so growing them changes no
+        result - a sequence longer than the current table produces exactly the
+        logits it would have with a table preallocated to that size. This is
+        what makes the context limit an allocation detail rather than an
+        architectural one: nothing here is learned, and the buffers are
+        non-persistent so they never enter a checkpoint.
+        """
+        positions = torch.arange(length, device=self.inv_freq.device).float()
+        angles = torch.einsum("i,j->ij", positions, self.inv_freq)
         self.register_buffer("cos", angles.cos().repeat_interleave(2, dim=-1),
                              persistent=False)
         self.register_buffer("sin", angles.sin().repeat_interleave(2, dim=-1),
@@ -36,9 +50,11 @@ class RoPECache(nn.Module):
         """Return (cos, sin) broadcastable to (batch, heads, seq_len, head_dim)."""
         end = offset + seq_len
         if end > self.cos.size(0):
-            raise ValueError(
-                f"RoPE cache holds {self.cos.size(0)} positions, need {end}"
-            )
+            # Grow geometrically rather than refusing. The model has no learned
+            # position parameters, so the only thing a longer context costs is
+            # this table plus the attention itself. Whether the model is any
+            # GOOD that far out is a training-data question, not this one.
+            self._build(max(end, self.cos.size(0) * 2))
         cos = self.cos[offset:end].unsqueeze(0).unsqueeze(0)
         sin = self.sin[offset:end].unsqueeze(0).unsqueeze(0)
         if device is not None:

@@ -287,15 +287,44 @@ If native loading is attempted later, the architecture is the easy half: RMSNorm
 + RoPE + SwiGLU + GQA + QK-Norm, no biases, pre-norm is essentially Qwen3, which
 llama.cpp supports. Verify against the real converter rather than assuming.
 
+### Context length is now dynamic
+
+`max_len` is an allocation hint, not a limit. `RoPECache` grows its tables on
+demand instead of raising, so a sequence longer than the declared `max_len`
+produces exactly the logits it would have with a table preallocated to that size
+(verified to 5.96e-07, float32 rounding). 131,072 tokens have been run through a
+model declared `max_len=512`.
+
+This works because there are **no learned position parameters** - RoPE is a pure
+function of position and its buffers are non-persistent, so they never enter a
+checkpoint. Memory scales linearly with length (0.06 GiB at 4k, 0.42 at 40k,
+1.33 at 131k on a small model), which is flash SDPA doing its job.
+
+**This is not length generalization.** The model runs at any length and is only
+good near the lengths it trained on, which is ~14.5k - the longest trace in the
+dataset. Past that, RoPE extrapolation degrades. Fixing that needs either RoPE
+scaling at inference (NTK-aware, YaRN, linear position interpolation) or training
+on genuinely long sequences. Enabling 32k costs almost nothing; *earning* 32k is
+a data problem.
+
+Offloading is not needed at this scale. The weights are 300 MB and a 32k training
+step peaked at 3.6 GiB on a 32 GB card.
+
 ### Long responses
 
 The target is responses up to ~3,000 tokens. At byte level that is 3,000
 characters, about **484 words**. With BPE at 3.01x it is ~9,030 characters, about
 **1,456 words**, in the same 38 seconds of decode.
 
-Current generation caps are far below either: `run_agent` defaults to
-`max_new=120`, `agent/chat.py` uses 400, `serve_ollama_compat.py` uses 300.
-These need raising regardless of the tokenizer decision.
+Generation caps are now 4,096 everywhere (`run_agent`, `agent/chat.py`,
+`serve_ollama_compat.py`). `max_new` is a ceiling, not a target - generation
+stops at `</assistant>`, so an ordinary tool call still costs the ~100 tokens it
+needs. The tradeoff is the worst case: a model that never emits a closing tag
+now burns 4,096 tokens, ~51 s at the measured ~80 tok/s, instead of 120.
+
+At 51 s per long response, `torch.compile` or CUDA graphs on the single-token
+step is the obvious lever, since decode is per-step-overhead bound and flat with
+length.
 
 ## Next
 

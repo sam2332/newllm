@@ -68,7 +68,7 @@ def handle_chat(payload: dict) -> dict:
             STATE["model"], question, STATE["toolbox"],
             device=STATE["device"], greedy=True, tokenizer=STATE["tokenizer"],
             conversation=conversation or None, system=system,
-            max_steps=5, max_new=300,
+            max_steps=5, max_new=4096,
         )
 
     # The loop already executed the tools, so the reply is a finished answer.

@@ -99,7 +99,7 @@ def chat_mode(model: Transformer, toolbox: Toolbox, device: str):
         if question.lower() in {"exit", "quit", "q"}:
             break
         result = run_agent(model, question, toolbox, device=device,
-                           sampler=sampler, max_steps=5, max_new=400,
+                           sampler=sampler, max_steps=5, max_new=4096,
                            tokenizer=load_tokenizer_for(model))
         _print_trace(result)
 
@@ -108,7 +108,7 @@ def test_mode(model: Transformer, toolbox: Toolbox, device: str, questions: list
     print(f"\nRunning {len(questions)} test questions...")
     for q in questions:
         result = run_agent(model, q, toolbox, device=device, greedy=True,
-                           max_steps=5, max_new=400,
+                           max_steps=5, max_new=4096,
                            tokenizer=load_tokenizer_for(model))
         print(f"Q: {q}")
         print(f"A: {result['final_answer']}")

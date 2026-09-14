@@ -131,7 +131,7 @@ def _select_final_answer(response: str, steps: list) -> str:
 
 
 def run_agent(model, question: str, toolbox: Toolbox,
-              max_steps: int = 5, max_new: int = 120,
+              max_steps: int = 5, max_new: int = 4096,
               sampler: Sampler = None, device: str = "cuda",
               greedy: bool = False,
               tokenizer: AgentTokenizer = DEFAULT_AGENT_TOKENIZER,
@@ -139,6 +139,13 @@ def run_agent(model, question: str, toolbox: Toolbox,
               conversation: list = None,
               system: str = None) -> dict:
     """Run an interactive JSON tool-use loop with the model.
+
+    ``max_new`` is a ceiling, not a target: generation stops at
+    ``</assistant>``, so an ordinary tool call still costs the ~100 tokens it
+    needs. It is set high enough for a long final response (4,096 tokens is
+    ~660 words byte-level, ~2,000 with a subword vocabulary) at the cost of a
+    worse worst case - a model that never emits a closing tag now burns 4,096
+    tokens, about 51 s at the measured ~80 tok/s, instead of 120.
 
     Returns dict with final_answer, thinking, trace, steps, and success.
     """
