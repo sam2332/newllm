@@ -187,10 +187,17 @@ was `outline.md` coming back verbatim from every `read_file`. Paged reads
 (`read_file` has taken `start`/`chars` since it was written; the generator
 never used them) took it to 75.8% / 0.168: real, and nowhere near enough.
 
-The ceiling is the library. 894 chapters over 400 arcs means each chapter is
-written verbatim ~4.5 times before any arc repeats, and every arc writes its
-chapters into files. No amount of composition fixes that - only more stories
-would, and the teacher cost is the reason composition exists.
+**Fixed by importing a bigger library.** `scripts/import_hf_stories.py` takes
+20,000 human-written stories (88,044 chapters, 94 MB) from
+`euclaise/writingprompts` against the teacher's 894 chapters / 1.8 MB, and
+`load_stories` accepts both. That moved the slice to 63.1% / 0.231.
+
+The measurement that matters is what remains: **99% of the leftover repetition
+is *within* one trace, not across traces** - 37,275 within against 313 across,
+over 300 arcs. Within-trace duplication is the lesson: a chapter is written to
+a file and read back later, so the text appears twice by design. The defect
+was always cross-trace reuse, and that is now gone. The corpus-wide "78.8%"
+figure conflated the two.
 
 **So treat `project_traces` as a teacher of structure, not language**:
 write-then-read-back continuity over a long horizon, worth keeping at a small

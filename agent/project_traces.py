@@ -20,6 +20,7 @@ unchanged, including tool/parameter-name randomization.
 """
 
 import json
+import os
 import random
 
 from agent.chat_dataset import serialize_chat
@@ -60,6 +61,12 @@ START_PHRASINGS = [
     "I want to work on a {genre} novel, \"{title}\". Here's the idea: {premise} Put the outline in a file.",
     "New project: \"{title}\" ({genre}). {premise} Start by writing the plan to outline.md.",
     "Help me draft \"{title}\", a {genre} story. {premise} Save the chapter plan before we begin.",
+    "I'd like to start \"{title}\" - a {genre}. {premise} Write the plan down first.",
+    "Working title \"{title}\", genre {genre}. {premise} Get the outline saved.",
+    "Can you help with \"{title}\"? It's a {genre}. {premise} Outline first, please.",
+    "Project \"{title}\" ({genre}): {premise} Put a plan on disk before drafting.",
+    "Starting something new - \"{title}\", {genre}. {premise} Save the structure first.",
+    "\"{title}\" is the working title, a {genre} piece. {premise} Write me an outline file.",
 ]
 CHAPTER_PHRASINGS = [
     "Write chapter {i}.", "Next chapter please.", "Go ahead with chapter {i}: {summary}",
@@ -67,6 +74,18 @@ CHAPTER_PHRASINGS = [
     "Chapter {i} - keep it consistent with the outline.",
 ]
 QUESTION_KINDS = ["character_role", "chapter_summary", "protagonist", "setting", "chapter_opening"]
+
+
+def _question_kinds(story) -> list:
+    """Only the questions this story's outline can actually answer."""
+    kinds = ["chapter_summary", "chapter_opening"]
+    if story.get("characters"):
+        kinds.append("character_role")
+    if (story.get("protagonist") or {}).get("name"):
+        kinds.append("protagonist")
+    if story.get("setting"):
+        kinds.append("setting")
+    return kinds
 QUESTION_PHRASINGS = {
     "character_role": ["Remind me, what is {name}'s role?", "Who is {name} again?",
                        "What role does {name} play in the story?"],
@@ -83,10 +102,33 @@ REVISE_PHRASINGS = ["Add a final line to chapter {i}: \"{line}\"",
                     "End chapter {i} with the sentence: {line}"]
 CLOSING_LINES = ["The night held its breath.", "Nothing would be the same after this.",
                  "Somewhere, a door closed.", "It was only the beginning.",
-                 "The lights went out one by one."]
+                 "The lights went out one by one.", "No one spoke for a long while.",
+                 "The rain started, and did not stop.", "She did not look back.",
+                 "The road went on without them.", "Morning came anyway.",
+                 "He counted the cost and paid it.", "The letter stayed unopened.",
+                 "They agreed never to speak of it.", "Something shifted, and held.",
+                 "The map ended there.", "It was quieter than he expected.",
+                 "The door stayed shut until spring.", "Nobody came looking.",
+                 "The tide took the rest.", "That was the last of the old world."]
 LIST_PHRASINGS = ["What files do we have so far?", "List the workspace.", "Show me what's been saved."]
 RECAP_PHRASINGS = ["Give me a recap of everything so far.", "Summarize the whole story to this point.",
                    "Write a few paragraphs recapping the chapters we have."]
+
+
+def load_stories(spec) -> list:
+    """Load one story library or several, comma-separated.
+
+    The teacher library is 894 chapters and is the ceiling on how diverse
+    these arcs can be; data/hf_stories.json adds 88,044 human-written ones.
+    Both shapes are accepted - imported stories simply carry no protagonist
+    or characters, and _question_kinds skips what an outline cannot answer.
+    """
+    stories = []
+    for path in str(spec or "").split(","):
+        path = path.strip()
+        if path and os.path.exists(path):
+            stories.extend(json.load(open(path)))
+    return stories
 
 
 def _aj(thought, response=None, tool_call=None):
@@ -99,11 +141,24 @@ def _aj(thought, response=None, tool_call=None):
 
 
 def _outline_text(story):
-    lines = [f"Title: {story['title']}", f"Genre: {story['genre']}",
-             f"Premise: {story['premise']}",
-             f"Protagonist: {story['protagonist']['name']} - {story['protagonist']['trait']}",
-             f"Setting: {story.get('setting', '')}", "Characters:"]
-    lines += [f"- {c['name']}: {c['role']}" for c in story.get("characters", [])]
+    """The outline as it is written to disk.
+
+    Imported stories (``scripts/import_hf_stories.py``) have no protagonist,
+    characters or setting: the source never named them, and inventing them
+    would put a claim in an observation that nothing supports. Those lines are
+    omitted rather than filled in, and the questions that depend on them are
+    skipped - see ``_question_kinds``.
+    """
+    prot = story.get("protagonist") or {}
+    lines = [f"Title: {story['title']}", f"Genre: {story.get('genre', 'story')}",
+             f"Premise: {story['premise']}"]
+    if prot.get("name"):
+        lines.append(f"Protagonist: {prot['name']} - {prot.get('trait', '')}")
+    if story.get("setting"):
+        lines.append(f"Setting: {story['setting']}")
+    if story.get("characters"):
+        lines.append("Characters:")
+        lines += [f"- {c['name']}: {c['role']}" for c in story["characters"]]
     lines.append("Chapters:")
     lines += [f"{i+1}. {c['title']}: {c['summary']}" for i, c in enumerate(story["chapters"])]
     return "\n".join(lines)
@@ -211,7 +266,7 @@ class ProjectComposer:
                 in_context = {path}
                 next_chapter += 1
             elif action == "question":
-                kind = rng.choice(QUESTION_KINDS)
+                kind = rng.choice(_question_kinds(story))
                 if kind == "character_role" and story.get("characters"):
                     c = rng.choice(story["characters"])
                     add_user(rng.choice(QUESTION_PHRASINGS[kind]).format(name=c["name"]))

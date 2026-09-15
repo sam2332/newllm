@@ -88,10 +88,10 @@ def _worker(args):
     # Long multi-turn projects over the virtual workspace (agent/project_traces).
     project_fraction = extras.get("project_fraction", 0.0)
     stories_path = extras.get("stories")
-    if project_fraction and stories_path and os.path.exists(stories_path):
-        from agent.project_traces import generate_project_traces
-        stories = json.load(open(stories_path))
-        want = int(n * project_fraction)
+    if project_fraction and stories_path:
+        from agent.project_traces import generate_project_traces, load_stories
+        stories = load_stories(stories_path)
+        want = int(n * project_fraction) if stories else 0
         traces.extend(generate_project_traces(
             stories, want, seed=shard_seed + 5, max_turns=extras.get("max_turns", 52),
             char_budget=extras.get("char_budget", 60000)))
@@ -122,8 +122,9 @@ def _worker(args):
     if direct_fraction:
         from agent.direct_traces import generate_direct_traces
         stories = []
-        if stories_path and os.path.exists(stories_path):
-            stories = json.load(open(stories_path))
+        if stories_path:
+            from agent.project_traces import load_stories
+            stories = load_stories(stories_path)
         n_direct = int(n * direct_fraction)
         direct = generate_direct_traces(n_direct, stories, seed=shard_seed + 13)
         traces.extend(direct)

@@ -56,9 +56,10 @@ def main():
     traces = []
 
     n_project = int(args.samples * args.project_fraction)
-    if n_project and os.path.exists(args.stories):
+    if n_project:
         from agent.project_traces import generate_project_traces
-        stories = json.load(open(args.stories))
+        from agent.project_traces import load_stories
+        stories = load_stories(args.stories)
         traces.extend(generate_project_traces(stories, n_project, seed=args.seed,
                                               max_turns=args.max_turns, min_turns=8))
         print(f"  {len(traces):,} long project arcs from {len(stories)} stories")

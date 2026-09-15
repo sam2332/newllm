@@ -29,7 +29,7 @@ build(samples=$SAMPLES, mode="instruct", max_len=$MAXLEN, workers=16,
       protocol="chatml", verbose=True, info=info,
       extras=dict(hf_fraction=0.55, hf_traces="data/hf_openhermes.json,data/hf_xlam.json",
                   knowledge_fraction=0.15, knowledge="data/knowledge.json,data/knowledge_b.json,data/knowledge_c.json",
-                  project_fraction=0.10, stories="data/chapters.json", max_turns=52,
+                  project_fraction=0.10, stories="data/chapters.json,data/hf_stories.json", max_turns=52,
                   direct_fraction=0.05, persona_fraction=0.10,
                   personas="data/personas.json", format_fraction=0.05))
 print(info["path"])

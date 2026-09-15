@@ -49,7 +49,9 @@ def main():
     ap.add_argument("--workers", type=int, default=48)
     ap.add_argument("--project-fraction", type=float, default=0.0,
                     help="fraction of traces that are long workspace projects")
-    ap.add_argument("--stories", default="data/chapters.json")
+    ap.add_argument("--stories",
+                    default="data/chapters.json,data/hf_stories.json",
+                    help="one path or a comma-separated list")
     ap.add_argument("--max-turns", type=int, default=52)
     ap.add_argument("--char-budget", type=int, default=60000)
     ap.add_argument("--persona-fraction", type=float, default=0.0)
