@@ -148,6 +148,23 @@ the end of.
 queued earlier. Correct for the purpose (the blocking path exists because a
 daemon thread dies at interpreter shutdown) but surprising in a channel.
 
+## 11. `.gitignore` assumes a data layout that keeps changing
+
+**Status: fixed each time, three instances so far.**
+
+`archive/` needed `archive/*` plus a negation, because git cannot re-include a
+file under an excluded directory. `config.json` was created as `config..json`,
+which the rule did not match, leaving a live webhook URL one `git add -A` from
+being published. Then `data/pretrain/` did not exist when the data rules were
+written, so a `git add -A` swept **18 GB of packed shards** into a commit and
+turned the push into a timeout - caught before it reached the remote.
+
+The pattern: every new artefact directory is ignored *after* something goes
+wrong. `data/` holds generated and regenerable things almost exclusively;
+ignoring it wholesale and negating the few committed libraries
+(`personas.json`, `chapters.json`, `knowledge*.json`) would invert the default
+to the safe side.
+
 ## 10. Composed data is far less diverse than its trace count suggests
 
 **Status: the reason for the pretraining corpus. Not a bug, a property.**
