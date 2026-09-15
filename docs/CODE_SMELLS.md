@@ -4,7 +4,8 @@ Things that are wrong, or right but dangerous, with enough context to decide
 whether to fix them. Most were found by being bitten. Ordered by how much time
 they have cost or could cost.
 
-Last updated 2026-09-15.
+Last updated 2026-09-15. Entries marked **fixed** are kept because the
+reasoning is the useful part; the pattern usually recurs somewhere else.
 
 ---
 
@@ -26,13 +27,21 @@ nothing parsed) but they are guards on a design that invites the mistake. The
 real fix is one eval that reads the protocol from the checkpoint and dispatches
 internally, with the legacy scripts deleted rather than fenced off.
 
-**Related, unfixed:** `scripts/eval_random.py` still defaults `--cache` to a
-hardcoded hash (`data/cache/instruct_1d39780d71d5d7f5.pt`) that happens to be
-byte-tokenized. Nothing checks that.
+**Fixed:** the hardcoded `--cache` default (one particular byte-tokenized
+hash, unchecked) now defaults to the largest `data/cache/instruct_*.pt` and
+says which it picked.
 
 ## 2. The root directory is a graveyard
 
-**Status: unfixed. Low risk, high confusion.**
+**Status: fixed 2026-09-15.** `transformer.py`, `training_8k.py`,
+`training_8k_big.py`, `train_sequence_moe.py`, `big_training_test.py` and
+`live_training_test.py` moved to `archive/superseded/` after checking the
+import graph - each had zero importers. `reasoning.py` stayed: it looked dead
+by name but `training/trainer.py` and `test_modern_features.py` both import
+`ReasoningTimeHelper` from it. Nineteen stray `agent_run_*.log` files remain,
+gitignored, local clutter only.
+
+Original note:
 
 Twelve `.py` files sit at the repo root, most superseded by packages:
 
@@ -52,9 +61,12 @@ Deleting the dead five plus `transformer.py` and `reasoning.py` is safe by
 import graph, but they are the only record of how earlier runs were launched.
 Move to `archive/` rather than delete.
 
-## 3. `tok.eot` is a string for BPE, an id elsewhere
+## 3. `tok.eot` is a string, and there was no id accessor
 
-**Status: worked around at the call site, not fixed at the source.**
+**Status: fixed 2026-09-15.** Both tokenizers now expose `eot_id` alongside
+`eot`, so callers stop improvising. `eot` is a string on *both* (`"<|im_end|>"`
+and `"\x03"`) - the original note here was wrong about them disagreeing; the
+real problem was that nothing offered the number.
 
 `BPEAgentTokenizer.eot` returns `"<|im_end|>"`; code that treats it as an id
 writes garbage. In `scripts/build_pretrain_shards.py` this would have poisoned
@@ -74,8 +86,10 @@ a streaming dataset queues the entire dataset before yielding anything. The
 builder now submits a bounded window of futures by hand, which is lazy *and*
 loud.
 
-`agent/dataset_builder.py` still uses `mp.Pool` over a finite job list. Lower
-risk (the work is bounded and local) but the same failure mode.
+**Fixed:** `agent/dataset_builder.py` moved to `ProcessPoolExecutor` too.
+`map()` is safe there because the job list is finite - it is only over a
+*stream* that `Executor.map` becomes a trap by consuming the whole input up
+front.
 
 ## 5. Manifests and metadata written only on the happy path
 
@@ -89,7 +103,9 @@ work); the shard builder had to learn it separately.
 
 ## 6. Training run length is easy to get wrong by 7x
 
-**Status: inherent, needs a guard.**
+**Status: guarded 2026-09-15.** `Trainer` now prints
+`horizon: N iters = X epochs` at construction and warns loudly above 10
+epochs, naming the reason a late stop cannot rescue it.
 
 `--iters` is optimizer steps, and epochs are
 `batches_per_epoch / grad_accum`. 150,000 iters was described in this repo's
@@ -123,7 +139,9 @@ is excluded, so `archive/` + `!archive/notes/` silently did nothing and needed
 
 ## 9. Blocking and async notifications can arrive out of order
 
-**Status: known, minor.**
+**Status: fixed 2026-09-15.** A blocking send now drains the queue first (up
+to 15 s) so a finish or crash message cannot overtake the progress it reports
+the end of.
 
 `agent/notify.py` queues async posts on a daemon thread but sends
 `blocking=True` inline, so a crash report can land before progress messages

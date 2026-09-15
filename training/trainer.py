@@ -224,6 +224,7 @@ class Trainer:
         self.stopped_early = False
         self.checkpoint_path = checkpoint_path
         self.save_every = save_every
+        self._report_horizon(max_iters, grad_accum_steps)
         # Minutes between Discord progress posts; 0 disables them.
         self.notify_every_min = notify_every_min
         self.start_step = 0
@@ -236,6 +237,30 @@ class Trainer:
         self.last_grad_norm = 0.0
         if resume and checkpoint_path:
             self._resume_from(checkpoint_path)
+
+    def _report_horizon(self, max_iters: int, grad_accum: int):
+        """Say how many epochs --iters actually is, and complain if it is wild.
+
+        Epochs are batches_per_epoch / grad_accum, which is easy to misjudge:
+        150,000 iters was described in this repo's own notes as "2.5 epochs"
+        and is nearer 18. The LR schedule is warmup then cosine to 0.1x across
+        max_iters, so a horizon that is wrong at launch cannot be fixed by
+        stopping the run early - the weights never anneal.
+        """
+        try:
+            batches = len(self.batch_sampler) if self.batch_sampler is not None \
+                else len(self.loader)
+        except TypeError:
+            return
+        steps_per_epoch = max(1, batches // max(1, grad_accum))
+        epochs = max_iters / steps_per_epoch
+        print(f"horizon: {max_iters:,} iters = {epochs:.1f} epochs "
+              f"({steps_per_epoch:,} optimizer steps/epoch)")
+        if epochs > 10:
+            print(f"  WARNING: {epochs:.0f} epochs over one corpus is deep into "
+                  f"memorisation for most sizes. The cosine schedule runs to "
+                  f"--iters, so stopping early will NOT anneal the weights - "
+                  f"set --iters to the horizon you actually want.", flush=True)
 
     def _resume_from(self, path: str):
         """Restore model, optimizer and step from a periodic checkpoint."""

@@ -15,6 +15,7 @@ calling it fails exactly as it should.
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -83,7 +84,11 @@ def norm(s: str) -> str:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("checkpoint")
-    ap.add_argument("--cache", default="data/cache/instruct_1d39780d71d5d7f5.pt")
+    # No hardcoded hash: that default named one particular byte-tokenized
+    # cache and nothing checked it still existed or matched the checkpoint.
+    ap.add_argument("--cache", default=None,
+                    help="dataset cache to draw held-out traces from; "
+                         "defaults to the largest data/cache/instruct_*.pt")
     ap.add_argument("-n", type=int, default=100)
     ap.add_argument("--seed", type=int, default=42,
                     help="must match the training seed to reproduce the split")
@@ -99,6 +104,14 @@ def main():
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
 
+    if not args.cache:
+        import glob
+        found = sorted(glob.glob("data/cache/instruct_*.pt"),
+                       key=os.path.getsize, reverse=True)
+        if not found:
+            raise SystemExit("no dataset cache found; pass --cache")
+        args.cache = found[0]
+        print(f"using cache {args.cache}")
     data = torch.load(args.cache, weights_only=False)
     ds = PrebuiltDataset(data)
     val_n = max(1, int(len(ds) * 0.05))

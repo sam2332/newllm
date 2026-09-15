@@ -161,6 +161,13 @@ def notify(message: str, *, tag: str = None, host: bool = True,
         content = content[:MAX_CONTENT - 3] + "..."
     payload = {"content": content, "username": d["username"]}
     if blocking:
+        # Drain anything already queued first, so the final message of a
+        # process does not overtake the progress it is reporting the end of.
+        q = _state.get("queue")
+        if q is not None:
+            deadline = time.time() + 15
+            while not q.empty() and time.time() < deadline:
+                time.sleep(0.05)
         try:
             _post(d["url"], payload)
             _state["last_sent"] = time.time()

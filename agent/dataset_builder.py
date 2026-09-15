@@ -234,9 +234,15 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
               f"({shards} shards, protocol {protocol}, tokenizer "
               f"{tokenizer_key(tokenizer_spec)})...", flush=True)
     t0 = time.time()
+    # ProcessPoolExecutor rather than mp.Pool: Pool.map blocks forever if a
+    # worker dies, which is how the pretraining shard build hung for 1h50m
+    # with every child a zombie. The work here is bounded and local so the
+    # risk is lower, but the failure mode is identical and the fix is free.
+    # map() is safe here (unlike over a stream) because jobs is a finite list.
+    from concurrent.futures import ProcessPoolExecutor
     ctx = mp.get_context("spawn")
-    with ctx.Pool(workers) as pool_proc:
-        results = pool_proc.map(_worker, jobs)
+    with ProcessPoolExecutor(workers, mp_context=ctx) as pool_proc:
+        results = list(pool_proc.map(_worker, jobs))
     data = [item for shard in results for item in shard]
     dt = time.time() - t0
     if verbose:

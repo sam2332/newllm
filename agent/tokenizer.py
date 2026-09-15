@@ -93,5 +93,12 @@ class AgentTokenizer:
         """End-of-turn marker: the assistant stops and yields to the user."""
         return "\x03"
 
+    @property
+    def eot_id(self) -> int:
+        """The same marker as a token id; see BPEAgentTokenizer.eot_id."""
+        ids = self.encode(self.eot)
+        assert len(ids) == 1, f"EOT must be one token, got {ids}"
+        return ids[0]
+
 
 DEFAULT_AGENT_TOKENIZER = AgentTokenizer()

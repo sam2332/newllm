@@ -39,13 +39,12 @@ _EOT_ID = None
 
 
 def _eot_id(tok):
-    """The id, not the string. ``tok.eot`` is "<|im_end|>" for the BPE
-    tokenizer, and writing a str into a uint16 array raises - or worse,
-    silently writes the wrong thing across ten billion tokens."""
-    eot = getattr(tok, "eot", None)
-    if isinstance(eot, int):
-        return eot
-    ids = tok.encode(eot if isinstance(eot, str) else "<|im_end|>")
+    """The id, not the string: ``tok.eot`` is "<|im_end|>", and writing a str
+    into a uint16 array would silently poison the corpus."""
+    eot_id = getattr(tok, "eot_id", None)
+    if isinstance(eot_id, int):
+        return eot_id
+    ids = tok.encode(getattr(tok, "eot", "<|im_end|>"))
     if len(ids) != 1:
         raise SystemExit(f"EOT did not encode to a single token: {ids}")
     return ids[0]

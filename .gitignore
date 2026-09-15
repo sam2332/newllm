@@ -46,3 +46,10 @@ config.json
 # outside the ignore rule and one "git add -A" from being published.
 config*.json
 !config.example.json
+
+# Pretraining shards: 18 GB of packed uint16 tokens, rebuildable from
+# scripts/build_pretrain_shards.py. A `git add -A` swept these in once and
+# turned a push into a timeout.
+data/pretrain/
+# Imported HF datasets: large, and reproducible from scripts/import_hf_dataset.py
+data/hf_*.json

@@ -82,6 +82,17 @@ class BPEAgentTokenizer:
         """End-of-turn marker in ChatML."""
         return "<|im_end|>"
 
+    @property
+    def eot_id(self) -> int:
+        """The same marker as a token id.
+
+        ``eot`` is a *string* on both tokenizers, and code that needs a number
+        kept re-deriving one. Writing the string into a uint16 array would
+        have poisoned ten billion tokens in the pretraining shards; it was
+        caught there, but every other caller was improvising.
+        """
+        return self._special_ids["<|im_end|>"]
+
     def special_id(self, token: str) -> int:
         return self._special_ids[token]
 
