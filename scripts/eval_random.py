@@ -152,6 +152,16 @@ def main():
             print(f"  {i}/{len(picks)}  {ok} correct", flush=True)
 
     scored = len(picks) - skipped
+    if skipped == len(picks):
+        # Every trace unparseable means the cache was tokenized for a
+        # different protocol, not that the model failed: a BPE/ChatML cache
+        # decoded with the byte tokenizer yields no <assistant> block at all.
+        # Printing 0/0 here reads as "the model is broken" when the model was
+        # never asked anything, which cost an afternoon once already.
+        raise SystemExit(
+            f"all {skipped} traces were unparseable: {args.cache} does not "
+            f"look like a byte-tokenized legacy cache.\n"
+            f"For a ChatML dataset use scripts/eval_chatml_random.py.")
     print(f"\n{ok}/{scored} correct ({ok/max(scored,1):.0%})"
           f"{f'  [{skipped} unparseable, skipped]' if skipped else ''}")
     print("by tool-calls in the reference trace:")

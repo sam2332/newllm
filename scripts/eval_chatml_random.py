@@ -286,6 +286,11 @@ def main():
             print(f"  {i}/{len(picks)} scored, {ok} correct", flush=True)
 
     scored = len(picks) - skipped
+    if skipped == len(picks):
+        raise SystemExit(
+            f"all {skipped} traces were unparseable: {args.cache} does not "
+            f"look like a ChatML cache for this checkpoint's tokenizer.\n"
+            f"For a byte-tokenized legacy cache use scripts/eval_random.py.")
     pct = 100.0 * ok / scored if scored else 0.0
     print(f"\n{ok}/{scored} correct ({pct:.0f}%)"
           + (f"  [{skipped} unparseable, skipped]" if skipped else ""))
