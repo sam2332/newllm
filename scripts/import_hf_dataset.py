@@ -142,7 +142,10 @@ def row_to_trace(row: dict, turn_key=None, tools_key="tools"):
     if turns is None:
         # Flat single-turn rows: query/answer under any of several names.
         q = _first(row, ("query", "question", "instruction", "input", "prompt"))
-        a = _first(row, ("answer", "output", "response", "completion"))
+        # xlam-function-calling-60k calls it "answers", and its value is a
+        # JSON list of calls rather than prose - _calls_from turns that into
+        # one assistant tool_call turn per call.
+        a = _first(row, ("answer", "answers", "output", "response", "completion"))
         if not q:
             return None, tools
         turns = [{"role": "user", "content": q}]
