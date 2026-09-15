@@ -1,7 +1,9 @@
 # Guide for AI agents working in this repo
 
-Updated 2026-09-14. If something here disagrees with
-[HANDOFF.md](HANDOFF.md), HANDOFF wins.
+Updated 2026-09-15. If something here disagrees with
+[HANDOFF.md](HANDOFF.md), HANDOFF wins. [CLAUDE.md](CLAUDE.md) carries the
+same rules with the architecture behind them; [docs/CODE_SMELLS.md](docs/CODE_SMELLS.md)
+lists the traps that have actually cost time.
 
 ## Read first
 
@@ -17,12 +19,20 @@ known to be wrong - that file's README lists which.
 
 - **`.venv/bin/python` for everything.** System Python is 3.14 and has no torch
   wheels.
-- **Train on one GPU.** Both under load browns the machine out. Use
-  `CUDA_VISIBLE_DEVICES=1` (the 5090) or the run scripts, which do it for you.
-- **The teacher never produces a tool result.** `gen_data_ollama.py` supplies
-  phrasings, reasoning sentences and factual key/value pairs only. Every
-  observation comes from the real `Toolbox` and is verified. Break this and the
-  dataset stops being ground truth.
+- **Train on one GPU.** Both under load browns the machine out - it is a fuse
+  in the building. Use `CUDA_VISIBLE_DEVICES=1` (the 5090) or the run scripts.
+  Whole-machine draw is what trips it, so a CPU-saturating job counts: two
+  Ollama containers spilling a 34 GB model onto 96 cores did it.
+- **Never `pkill -f` a pipeline script.** The pattern matches the shell whose
+  own command line contains it and kills your session mid-command. Three times
+  so far. Use explicit PIDs or `scripts/run/launch_*.sh`.
+- **Read the protocol from the checkpoint.** A byte-tokenizer eval pointed at a
+  ChatML checkpoint prints `0/0` having asked the model nothing, which reads as
+  a broken model. `04_eval.sh` dispatches on `config["tokenizer"]["kind"]`.
+- **The teacher never produces a tool result.** The Ollama generators supply
+  phrasings, reasoning sentences, prose and code only. Every observation comes
+  from the real `Toolbox` or `VirtualWorkspace` and is verified. Break this and
+  the dataset stops being ground truth.
 - **Keep the three tool tiers separate.** `repo_tools` reads the repo and runs
   nothing; `sandbox_tools` runs code and cannot see the repo. Merging them lets a
   confused model read a host path and act on it. A write-file tool goes in a
@@ -36,10 +46,14 @@ known to be wrong - that file's README lists which.
 ## Common commands
 
 ```bash
-scripts/run/00_preflight.sh                              # before anything else
-scripts/run/02_build_dataset.sh                          # ~20 min, ~6 GB
-scripts/run/03_train.sh                                  # ~89 min, detached
-scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt  # ~10 min
+scripts/run/00_preflight.sh                               # before anything else
+scripts/run/02_build_dataset.sh                           # ~3 min, ~12 GB
+scripts/run/03_train.sh                                   # detached, one GPU
+scripts/run/04_eval.sh checkpoints_moe_v2/agent_best.pt   # picks the harness
+
+# what it SAYS, not what it scores - run this first
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/coherence_probe.py <ckpt>
+.venv/bin/python scripts/notify_test.py                   # check the webhook
 
 # diagnose the dominant failure (chains of 4+ tool calls)
 CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/diag_deep_chains.py 40

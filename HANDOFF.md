@@ -3,40 +3,61 @@
 Current state of the project. **This file describes what is true now, not how it
 got that way** - superseded notes are in [archive/notes/](archive/notes/).
 How to actually run things: [scripts/run/README.md](scripts/run/README.md).
+Traps that have cost real time: [docs/CODE_SMELLS.md](docs/CODE_SMELLS.md).
 
-Last verified 2026-09-14.
+Last verified 2026-09-15.
 
 ## What this is
 
-A byte-level transformer (74.8M parameters) trained from scratch to use tools
-through a JSON protocol. It reads tool schemas from its context the way real
-function-calling APIs pass them, so it can serve tools it was never trained on.
+A transformer trained from scratch to use tools and chat, reading tool schemas
+from its context the way real function-calling APIs pass them, so it can serve
+tools it was never trained on. The end goal is **tools + chat + some roleplay**,
+loaded natively in Ollama as a GGUF.
 
-The end goal is a small-to-medium model that does **tools + chat + some
-roleplay**, usable from Ollama.
+Two generations coexist. The legacy one is byte-level (273 tokens), 74.8M
+dense parameters, speaking a bespoke `<assistant>{json}</assistant>` protocol.
+The current one is BPE (8,192, Qwen2 pre-tokenizer), ChatML on the Qwen3
+template, 561M total / 172M active MoE at `arch_version 3`.
 
 ## Where it stands
 
 | capability | state |
 |---|---|
-| tool use (instruct) | **41/100** on held-out traces. Works; not accurate yet |
-| chat | **never trained.** Pipeline and eval are ready and unused |
-| roleplay | **does not exist.** No data, no eval, no format decision |
-| smallest viable size | **never tested.** Every number here is the M preset |
-| Ollama | proxy works (`serve_ollama.py`). Native GGUF not attempted |
+| tool use, legacy | **41/100** held-out, reproducible. Strong at 1-2 calls (75-83%), weak at 4+ (20%) |
+| tool use, MoE | 29/100 overall, **37% on grounded answers**. Better deep (57% at 4-7 hops), worse shallow (44%) |
+| coherence, MoE | **broken.** "2 + 2" answers with gibberish; cannot recall a code from two turns back; 0/24 on the needle test at every length including 4k |
+| knowledge | real where data was thick - correct on Python generators and `set -e`; incoherent on science (2,672 items vs python's 6,872) |
+| chat | trained, never properly evaluated |
+| roleplay | personas exist in data; no eval |
+| Ollama | proxy works (`serve_ollama.py`); **GGUF exports cleanly** as `qwen3moe` with 65,536 context, not yet loaded into a container |
 
-Best checkpoint: `checkpoints_long_M/agent_best.pt` (40,000 iters, val 0.0434).
+Checkpoints: `checkpoints_long_M/agent_best.pt` (legacy best, val 0.0434),
+`checkpoints_moe_v2/agent_best.pt` (30,000 iters in 9.5h, best val 1.0324,
+final train 0.618).
 
-```
-41/100 correct, by tool calls the reference needed:
-  1 call   15/20     <- fine
-  2 calls  10/12     <- fine
-  3 calls   6/19
-  4+ calls 10/49     <- half the distribution lives here
-```
+**The headline finding.** The MoE model recites its training set rather than
+generalising. `scripts/coherence_probe.py` shows it answering "Hello!" with a
+sentence copied verbatim from `agent/direct_traces.py` and "List three fruits"
+with "I can't - I have no access to your email". Results track data volume per
+domain almost monotonically. The corpus explains it: 260k traces composed from
+a few thousand library items, **78.8% of sentences are repeats** of another
+sentence, distinct-8 of 0.288, roughly 1B tokens against 561M parameters where
+Chinchilla wants 20:1. A bigger model on this corpus memorises harder.
 
-**That last row is the whole result.** 49 of 100 held-out traces need four or
-more tool calls and the model gets 10 of them. Everything else is in decent shape.
+## The data now on disk
+
+| set | size | purpose |
+|---|---|---|
+| `data/pretrain/` | **9.5B tokens**, 19 uint16 shards, 18 GB | FineWeb-Edu. Language itself - the stage this project never had |
+| `data/hf_openhermes.json` | 300,000 traces | general instruction-following, the corpus had none |
+| `data/hf_xlam.json` | 60,000 traces, 3,605 distinct tool names | tool calling against schemas the model has never seen |
+| `data/knowledge*.json` | 24,579 items, 6 domains | subject knowledge, teacher-written |
+| `data/chapters.json`, `data/personas.json` | 894 chapters, 462 personas | long project arcs, persona voice |
+
+The plan these support: pretrain on the shards for base competence, then SFT on
+the instruct mix, with `coherence_probe.py` as the first gate rather than an
+afterthought. The packed-sequence pretraining path (plain LM loss, no
+supervision mask) is **not yet written** - that is the next piece of work.
 
 ## Environment
 
@@ -83,7 +104,30 @@ reflog.
 
 ## Measured performance
 
-Single GPU, M preset, `--batch-size 2 --grad-accum 8 --grad-checkpoint`:
+**The MoE run** (`deep-moe-20`, 5090, token-budget batching at 16,384 x 8
+accumulation): 30,000 iters in **9h30m**, ~1.14 s/it, 363 W, 16 GB.
+66,782 micro-batches per epoch over 8 accumulation steps is 8,348 optimizer
+steps per epoch, so 30,000 iters is ~3.6 epochs. The LR schedule is cosine
+across `--iters`, so that number has to be right at launch - a run cut short
+never anneals.
+
+**Batching reversed with MoE.** The dense byte model was fastest at batch 2
+because `collate_pad` padded to the longest member. MoE amortises its expert
+loop over the batch and wants the opposite:
+
+| preset | batch x seq | tok/s |
+|---|---|---|
+| L-moe | 2 x 832 | 6,149 |
+| L-moe | 16 x 1024 | **36,169** |
+| deep-moe-20 | 2 x 832 | 3,395 |
+| deep-moe-20 | 16 x 1024 | **27,108** |
+
+`TokenBudgetSampler` groups by length to a token budget instead, measured at
+0.1% padding waste. The validation loader must use it too: at a fixed batch of
+32 a 19k-token trace wants ~20 GiB in cross-entropy alone, and validation runs
+at step 0.
+
+### Legacy figures (byte model, M preset, `--batch-size 2 --grad-accum 8`)
 
 - **9.4 it/s**, 2.7 GiB peak, **341 W**. 40,000 iterations = **89 minutes**.
 - Decode is **~80 tok/s and flat** with length (82 at 256 tokens, 78.5 at 3,000),
@@ -217,9 +261,16 @@ an addition to `repo_tools`.
 scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt
 ```
 
-- `scripts/eval_random.py` - N random held-out traces from the same split and
-  seed the trainer used, with the toolbox renamed to match each trace's own
-  randomized schema. **This is the number to report.**
+- `scripts/eval_chatml_random.py` - the current one. Same split, same seed,
+  replayed as a real agent loop against the trace's own schema. Reports
+  grounded answers and free-text separately with token F1, plus buckets by
+  tool-call depth, because exact match is right for "2336" and meaningless for
+  a paragraph. **This is the number to report for a ChatML checkpoint.**
+- `scripts/coherence_probe.py` - ten plain prompts, raw replies printed.
+  **Run this first.** A checkpoint can post a respectable exact-match score
+  while answering "What is 2 + 2?" with gibberish.
+- `scripts/eval_random.py` - the legacy equivalent, byte tokenizer and JSON
+  protocol only. It now refuses a ChatML checkpoint rather than printing 0/0.
 - `scripts/eval_agent.py` - 17 hand-written cases. A smoke test. One case is 5.9
   points and 13 of the 17 are single-hop toy questions, so it cannot express
   "how many out of 100". It is **off by default as a training signal** because it

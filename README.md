@@ -1,21 +1,38 @@
 # newllm
 
-A from-scratch transformer in Python/PyTorch, trained to use tools through a JSON
-protocol. Byte-level, 74.8M parameters, no pretrained weights.
+A from-scratch transformer in Python/PyTorch, trained to use tools and chat,
+aimed at loading natively in Ollama as a GGUF. No pretrained weights.
 
-The goal is **the smallest model that can accurately do tools and chat, with some
-roleplay, usable from Ollama** - see [goals.md](goals.md).
+The goal is **the smallest model that can accurately do tools and chat, with
+some roleplay, usable from Ollama** - see [goals.md](goals.md).
 
-Current state, honestly: tool use works and scores **41/100** on held-out traces;
-chat is trained-but-never-run; roleplay does not exist yet. Full detail in
-[HANDOFF.md](HANDOFF.md).
+Two generations live in this repo:
+
+| | legacy | current |
+|---|---|---|
+| tokenizer | byte-level, 273 tokens | BPE 8,192 (Qwen2 pre-tokenizer) |
+| protocol | `<assistant>{json}</assistant>` | ChatML / Qwen3 template |
+| model | dense, 74.8M | MoE, 561M total / 172M active, `arch_version 3` |
+| checkpoint | `checkpoints_long_M/` | `checkpoints_moe_v2/` |
+| held-out score | **41/100** | 29/100 (37% on grounded answers) |
+
+Current state, honestly: the legacy model calls tools at 41/100 and is the
+better tool caller at shallow depth. The MoE generation is better on long
+tool chains (57% at 4-7 hops against 32%), exports to GGUF cleanly with 64k
+context metadata, and **is not coherent** - it answers "What is 2 + 2?" with
+gibberish and cannot repeat a four-digit code from two turns earlier, because
+its corpus is composed from small libraries and measures 78.8% repeated
+sentences. A 9.5B-token FineWeb-Edu pretraining corpus now exists to fix that.
+Full detail in [HANDOFF.md](HANDOFF.md); known traps in
+[docs/CODE_SMELLS.md](docs/CODE_SMELLS.md).
 
 ## Quick start
 
 ```bash
 python3.12 -m venv .venv       # torch has no 3.14 wheels; system python is 3.14
 .venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
-.venv/bin/python -m pip install tqdm numpy pytest requests
+.venv/bin/python -m pip install tqdm numpy pytest requests \
+    gguf jinja2 ollama datasets
 
 scripts/run/00_preflight.sh    # checks GPU caps, systemd linger, venv, caches
 ```
@@ -27,7 +44,11 @@ Use `.venv/bin/python` for everything.
 ```bash
 scripts/run/02_build_dataset.sh                            # ~20 min, ~6 GB
 scripts/run/03_train.sh                                    # ~89 min, one GPU
-scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt    # ~10 min
+scripts/run/04_eval.sh checkpoints_moe_v2/agent_best.pt    # picks the harness
+
+# read what it SAYS before trusting what it scores
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python scripts/coherence_probe.py \
+    checkpoints_moe_v2/agent_best.pt
 ```
 
 Everything is overridable by environment variable
