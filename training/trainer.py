@@ -93,6 +93,7 @@ class Trainer:
                  num_workers: int = 4,
                  checkpoint_path: str = None,
                  save_every: int = 0,
+                 notify_every_min: float = 30.0,
                  resume: bool = False,
                  ddp: bool = False,
                  eval_fn=None,
@@ -199,6 +200,7 @@ class Trainer:
         else:
             self.val_loader = None
         self.ddp = ddp
+        self.lr = lr
         # Task accuracy, not validation loss, is the signal that matters.
         # Loss keeps falling while the model memorizes; accuracy is what turns
         # over when it starts overfitting.
@@ -222,6 +224,8 @@ class Trainer:
         self.stopped_early = False
         self.checkpoint_path = checkpoint_path
         self.save_every = save_every
+        # Minutes between Discord progress posts; 0 disables them.
+        self.notify_every_min = notify_every_min
         self.start_step = 0
         self.history = []
         self.val_history = []
@@ -442,7 +446,18 @@ class Trainer:
 
     def train(self):
         import time
+        from agent.notify import notify
         t_start = time.time()
+        last_ping = t_start
+        # Only rank 0 speaks: eight DDP ranks narrating the same run would
+        # make the channel useless.
+        rank = 0
+        if self.ddp:
+            import torch.distributed as dist
+            rank = dist.get_rank() if dist.is_initialized() else 0
+        speak = notify if rank == 0 else (lambda *a, **k: False)
+        speak(f"training started: {self.max_iters:,} iters, "
+              f"lr {self.lr:g}", tag="train")
         budget = self.max_minutes * 60 if self.max_minutes else 0
         data_iter = iter(self.loader)
         pbar = tqdm(range(self.start_step, self.max_iters), desc="training",
@@ -478,6 +493,17 @@ class Trainer:
                         }
                     postfix["val"] = f"{vl:.4f}"
             pbar.set_postfix(postfix)
+            # Paced by minutes, not steps: a step-count interval reports every
+            # few seconds early on and once an hour late on.
+            if self.notify_every_min and time.time() - last_ping >= self.notify_every_min * 60:
+                last_ping = time.time()
+                done = step - self.start_step + 1
+                total = max(1, self.max_iters - self.start_step)
+                rate = done / max(1e-9, time.time() - t_start)
+                eta_min = (total - done) / rate / 60 if rate else 0
+                speak(f"step {step:,}/{self.max_iters:,} ({100.0*step/self.max_iters:.1f}%) "
+                      f"loss {loss:.4f} best {self.best_loss:.4f} "
+                      f"val {self.best_val_loss:.4f} ETA {eta_min/60:.1f}h", tag="train")
             if self.save_every and step and step % self.save_every == 0:
                 self._save_resume_state(step)
 
@@ -495,6 +521,8 @@ class Trainer:
                 print(f"\n  time budget reached at step {step} "
                       f"({elapsed:.1f} min); resume state written",
                       flush=True)
+                speak(f"time budget reached at step {step:,} "
+                      f"({elapsed:.1f} min); resume state written", tag="train")
                 break
         # Prefer the best *accuracy* weights when a task eval was running;
         # fall back to best validation loss otherwise.

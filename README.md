@@ -101,6 +101,49 @@ once took the old model from 88.2% to 0.0%.
 Loss applies only to assistant spans. Every observation comes from the real
 toolbox, never from a teacher model.
 
+## Progress notifications (Discord)
+
+Generation, training and evaluation all run detached for hours, often across
+both GPUs and more than one machine. Point them at a Discord webhook and the
+milestones arrive in a chat room instead of a log you have to ssh in and tail.
+
+```bash
+cp config.example.json config.json     # then paste your webhook URL into it
+.venv/bin/python scripts/notify_test.py
+```
+
+```json
+{
+  "discord": {
+    "webhook_url": "https://discord.com/api/webhooks/...",
+    "username": "newllm",
+    "enabled": true,
+    "min_seconds_between": 2.0
+  }
+}
+```
+
+`config.json` is gitignored, because a webhook URL is a credential: anyone
+holding it can post to the channel. `$DISCORD_WEBHOOK_URL` overrides the
+file, and `$NEWLLM_CONFIG` points at a different config path. Set
+`"enabled": false` to mute without deleting anything.
+
+What reports, and when:
+
+| source | messages |
+|---|---|
+| training | start; progress every 30 min with loss, val and ETA; time-budget stop; finish with best val and checkpoint path |
+| teacher generators | start; every 200 requests with items/min and ETA; finish with totals |
+| `supervise_teachers.sh` | a warning whenever it restarts a dead generator |
+| evals | final score, grounded subset and mean F1 |
+| GGUF export | architecture, layers, vocab and file size |
+
+Every message carries the hostname, so several machines can share one
+channel. Nothing here can break or slow a run: posts go out on a daemon
+thread, every failure is swallowed after one warning to stderr, and training
+that cannot reach Discord simply carries on. Set `notify_every_min=0` on the
+`Trainer` to silence progress posts while keeping start and finish.
+
 ## Layout
 
 | path | what |

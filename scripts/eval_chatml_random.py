@@ -16,6 +16,7 @@ the reference beyond its first user turn is shown to the model.
 
 import argparse
 import json
+import os
 import random
 import re
 import sys
@@ -313,6 +314,12 @@ def main():
               f"mean token F1 {long_f1/long_total:.2f}")
         print("     (F1 is the number to read for prose; exact match scores a "
               "correct paraphrase zero)")
+    from agent.notify import notify
+    notify(f":bar_chart: **eval** `{os.path.basename(os.path.dirname(args.checkpoint))}`  "
+           f"{ok}/{scored} ({pct:.0f}%)"
+           + (f", grounded {short_ok}/{short_total} "
+              f"({100.0*short_ok/short_total:.0f}%), F1 {short_f1/short_total:.2f}"
+              if short_total else ""), tag="eval", blocking=True)
     print("by tool-calls in the reference trace (all answers):")
     for b in ("0-1", "2-3", "4-7", "8+"):
         if hops_total.get(b):

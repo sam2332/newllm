@@ -148,6 +148,10 @@ def export(checkpoint: str, out: str, dtype: str = "f16", name: str = "newllm"):
     size = os.path.getsize(out)
     print(f"wrote {out}: {arch}, {n_layers} layers, d_model {d_model}, "
           f"n_ff {n_ff}, vocab {len(tokens)}, {size/2**20:.0f} MiB")
+    from agent.notify import notify
+    notify(f":package: **GGUF exported** `{os.path.basename(out)}`\n"
+           f"{arch}, {n_layers} layers, d_model {d_model}, vocab {len(tokens)}, "
+           f"{size/2**20:.0f} MiB", tag="export", blocking=True)
     return out
 
 

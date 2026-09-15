@@ -1,0 +1,8 @@
+{
+  "discord": {
+    "webhook_url": "https://discord.com/api/webhooks/REPLACE/WITH_YOURS",
+    "username": "newllm",
+    "enabled": true,
+    "min_seconds_between": 2.0
+  }
+}

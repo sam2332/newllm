@@ -8,14 +8,17 @@ cd /home/lmeadows/llm
 while true; do
   if ! pgrep -f "out data/knowledge.json" > /dev/null; then
     echo "$(date +%H:%M:%S) teacher A down, restarting" >> logs/supervise.log
+    .venv/bin/python -c "from agent.notify import notify; notify(':warning: teacher A was down, restarting', tag='supervisor', blocking=True)" 2>/dev/null
     bash scripts/run/launch_teacher_a.sh >> logs/supervise.log 2>&1
   fi
   if ! pgrep -f "out data/knowledge_b.json" > /dev/null; then
     echo "$(date +%H:%M:%S) teacher B down, restarting" >> logs/supervise.log
+    .venv/bin/python -c "from agent.notify import notify; notify(':warning: teacher B was down, restarting', tag='supervisor', blocking=True)" 2>/dev/null
     bash scripts/run/launch_teacher_b.sh >> logs/supervise.log 2>&1
   fi
   if ! pgrep -f "out data/knowledge_c.json" > /dev/null; then
     echo "$(date +%H:%M:%S) teacher C down, restarting" >> logs/supervise.log
+    .venv/bin/python -c "from agent.notify import notify; notify(':warning: teacher C was down, restarting', tag='supervisor', blocking=True)" 2>/dev/null
     bash scripts/run/launch_teacher_c.sh >> logs/supervise.log 2>&1
   fi
   sleep 60

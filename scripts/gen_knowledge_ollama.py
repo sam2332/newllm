@@ -31,6 +31,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import notify
 from scripts.gen_data_ollama import ENDPOINTS, ollama_chat, save_atomic
 
 # (domain, language, filename hint, topic list). The language decides the
@@ -334,6 +335,8 @@ def main():
         picked = picked[:n + (0 if pool is arts else n_art)]
     jobs = picked[:want]
     rng.shuffle(jobs)
+    notify(f"knowledge teacher started: {len(jobs):,} requests, "
+           f"model `{args.model}`, {len(endpoints)} endpoint(s)", tag="teacher")
     print(f"{len(jobs)} requests x ~{args.per_request} items "
           f"({sum(1 for j in jobs if j[4] == "artifact")} artifact) across {len(names)} domains", flush=True)
 
@@ -366,6 +369,12 @@ def main():
             if k % 20 == 0:
                 print(f"  [{k}/{len(jobs)}] {len(items):,} items, {failed} failed, "
                       f"{(time.time()-t0)/60:.1f} min", flush=True)
+            if k % 200 == 0:
+                rate = len(items) / max(1e-9, (time.time() - t0) / 60)
+                eta = (len(jobs) - k) / max(1e-9, k / max(1e-9, (time.time()-t0)/60))
+                notify(f"teacher [{k}/{len(jobs)}] {len(items):,} items, "
+                       f"{failed} failed, {rate:.0f} items/min, ETA {eta/60:.1f}h",
+                       tag="teacher")
     save_atomic(items, partial)
     save_atomic(items, args.out)
 
@@ -374,6 +383,9 @@ def main():
         by_kind[i["kind"]] = by_kind.get(i["kind"], 0) + 1
         by_dom[i["domain"]] = by_dom.get(i["domain"], 0) + 1
     chars = sum(len(json.dumps(i)) for i in items)
+    notify(f":white_check_mark: **teacher finished** {len(items):,} items, "
+           f"{chars/1e6:.1f} MB in {(time.time()-t0)/60:.1f} min -> `{args.out}`",
+           tag="teacher", blocking=True)
     print(f"\n{len(items):,} items, {chars/1e6:.1f} MB in {(time.time()-t0)/60:.1f} min "
           f"-> {args.out}")
     print("  by kind:  " + ", ".join(f"{k} {v:,}" for k, v in sorted(by_kind.items())))

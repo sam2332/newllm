@@ -394,6 +394,15 @@ def main():
         "arch_version": args.arch_version, "rope_base": rope_base,
     }
     json.dump(meta, open(os.path.join(out_dir, "run.json"), "w"), indent=1)
+    if world_size == 1 or local_rank in (-1, 0):
+        from agent.notify import notify
+        # Blocking: the process exits right after this, and a daemon thread
+        # does not survive interpreter shutdown.
+        notify(f":white_check_mark: **training finished** `{args.size}`\n"
+               f"{meta['iters']:,} iters in {meta['minutes']/60:.1f}h, "
+               f"best val {meta['best_val_loss']:.4f}, "
+               f"final train {meta['final_train_loss']:.4f}\n"
+               f"`{out_dir}/agent_best.pt`", tag="train", blocking=True)
     if trainer.eval_history:
         print("\naccuracy curve:")
         for st, a in trainer.eval_history:
