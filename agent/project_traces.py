@@ -119,6 +119,30 @@ class ProjectComposer:
     def _t(self, kind, **kw):
         return self.rng.choice(THOUGHTS[kind]).format(**kw)
 
+
+    def _outline_args(self, outline: str, want: str = None) -> dict:
+        """Arguments for a *partial* outline read.
+
+        Re-reading the whole outline is what made these arcs the most
+        repetitive slice in the corpus by a wide margin: 81% of their
+        sentences were repeats, and 70% of that was this one file coming back
+        verbatim on every lookup. A real assistant looking for one character's
+        line does not re-read the entire plan either, and read_file has taken
+        start/chars since it was written - the generator simply never used it.
+        """
+        rng = self.rng
+        if want:
+            at = outline.find(want)
+            if at >= 0:
+                start = max(0, at - rng.randint(0, 120))
+                return {"path": "outline.md", "start": start,
+                        "chars": rng.randint(160, 420)}
+        if rng.random() < 0.25:
+            return {"path": "outline.md"}          # sometimes the whole thing
+        start = rng.randrange(0, max(1, len(outline) - 200))
+        return {"path": "outline.md", "start": start,
+                "chars": rng.randint(200, 600)}
+
     def compose(self, max_turns=52) -> list:
         """Return the message list for one arc (user/assistant/tool dicts)."""
         rng = self.rng
@@ -177,7 +201,7 @@ class ProjectComposer:
                 # After a few turns the outline has scrolled away; read it back
                 # before writing so continuity is a tool habit, not a memory trick.
                 if i > 0 and rng.random() < 0.6:
-                    call("read_file", {"path": "outline.md"}, "read_outline")
+                    call("read_file", self._outline_args(outline), "read_outline")
                 call("write_file", {"path": path, "content": ch["text"]}, "write", i=i + 1, path=path)
                 words = len(ch["text"].split())
                 respond(f"Chapter {i+1}, \"{ch['title']}\", is written and saved to {path} "
@@ -191,12 +215,13 @@ class ProjectComposer:
                 if kind == "character_role" and story.get("characters"):
                     c = rng.choice(story["characters"])
                     add_user(rng.choice(QUESTION_PHRASINGS[kind]).format(name=c["name"]))
-                    obs = call("read_file", {"path": "outline.md"}, "read_outline")
+                    obs = call("read_file", self._outline_args(outline, c["name"]),
+                               "read_outline")
                     respond(f"{c['name']} is {c['role']}." if f"- {c['name']}: {c['role']}" in obs
                             else f"According to the outline, {c['name']}: {c['role']}.")
                 elif kind in ("protagonist", "setting"):
                     add_user(rng.choice(QUESTION_PHRASINGS[kind]))
-                    call("read_file", {"path": "outline.md"}, "read_outline")
+                    call("read_file", self._outline_args(outline), "read_outline")
                     if kind == "protagonist":
                         p = story["protagonist"]
                         respond(f"The protagonist is {p['name']}, defined by being {p['trait']}.")
@@ -205,7 +230,7 @@ class ProjectComposer:
                 elif kind == "chapter_summary":
                     i = rng.choice(written)
                     add_user(rng.choice(QUESTION_PHRASINGS[kind]).format(i=i + 1))
-                    call("read_file", {"path": "outline.md"}, "read_outline")
+                    call("read_file", self._outline_args(outline), "read_outline")
                     respond(f"Chapter {i+1}, \"{story['chapters'][i]['title']}\": "
                             f"{story['chapters'][i]['summary']}")
                 else:  # chapter_opening: must read the chapter file itself
@@ -235,7 +260,7 @@ class ProjectComposer:
                 respond("So far we have: " + ", ".join(names) + ".")
             elif action == "recap":
                 add_user(rng.choice(RECAP_PHRASINGS))
-                call("read_file", {"path": "outline.md"}, "read_outline")
+                call("read_file", self._outline_args(outline), "read_outline")
                 parts = [f"Chapter {i+1} ({story['chapters'][i]['title']}): "
                          f"{story['chapters'][i]['summary']}" for i in written]
                 recap = (f"\"{story['title']}\" is a {story['genre']} story. {story['premise']}\n\n"

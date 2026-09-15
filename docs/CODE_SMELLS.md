@@ -167,10 +167,37 @@ to the safe side.
 
 ## 10. Composed data is far less diverse than its trace count suggests
 
-**Status: the reason for the pretraining corpus. Not a bug, a property.**
+**Status: measured per slice 2026-09-15. Partly a property, partly fixable.**
 
-260k traces composed from a few thousand library items measure at **78.8% of
-sentences being repeats** of another sentence in the corpus, distinct-8 of
-0.288. The trace count is not a diversity number and should never be quoted as
-one. `scripts/coherence_probe.py` exists because scores on such a corpus
-flatter the model badly.
+"The corpus is bunk" is too broad - the damage is concentrated. Measured at
+400 traces per generator:
+
+| slice | repeat sentences | distinct-8 |
+|---|---|---|
+| OpenHermes (imported) | 0.1% | 0.963 |
+| xlam (imported) | 0.0% | 0.827 |
+| `rich_dataset` (tools) | 4.7% | 0.385 |
+| `knowledge_traces` | 22.4% | 0.570 |
+| `direct_traces` | 32.7% | 0.305 |
+| **`project_traces`** | **81.3%** | **0.134** |
+
+The tool traces - the part this project is actually for - are *fine*.
+`project_traces` is the outlier by a wide margin, and 70% of its repetition
+was `outline.md` coming back verbatim from every `read_file`. Paged reads
+(`read_file` has taken `start`/`chars` since it was written; the generator
+never used them) took it to 75.8% / 0.168: real, and nowhere near enough.
+
+The ceiling is the library. 894 chapters over 400 arcs means each chapter is
+written verbatim ~4.5 times before any arc repeats, and every arc writes its
+chapters into files. No amount of composition fixes that - only more stories
+would, and the teacher cost is the reason composition exists.
+
+**So treat `project_traces` as a teacher of structure, not language**:
+write-then-read-back continuity over a long horizon, worth keeping at a small
+share. The SFT mix at 55% imported / 10% project measures 50.7% / 0.423
+against the old instruct-only corpus's 78.8% / 0.288.
+
+`direct_traces` is second worst for the same reason in miniature - its
+`SMALL_TALK`, `REASONING` and `DECLINE` lists are a dozen hardcoded strings
+each, so "Hello!" has exactly one correct answer in the entire corpus. That is
+why the trained model answers it verbatim.
