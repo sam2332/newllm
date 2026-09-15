@@ -1,0 +1,16 @@
+{
+ "vocab_size": 8192,
+ "special_tokens": [
+  "<|endoftext|>",
+  "<|im_start|>",
+  "<|im_end|>",
+  "<think>",
+  "</think>",
+  "<tool_call>",
+  "</tool_call>",
+  "<tool_response>",
+  "</tool_response>"
+ ],
+ "pre_tokenizer": "qwen2",
+ "model": "gpt2-bytelevel-bpe"
+}

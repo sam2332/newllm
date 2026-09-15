@@ -193,8 +193,11 @@ class ToolSchemaSampler:
         used = [t for t in used_tools if t in NAME_POOLS]
         pool = [t for t in NAME_POOLS if t not in set(used)]
         extras = []
-        if pool and self.rng.random() < self.distractor_prob:
-            k = self.rng.randint(1, min(self.max_distractors, len(pool)))
+        # With no tools used at all every entry is a distractor, and there
+        # must be at least one or the schema block would be empty.
+        if pool and (not used or self.rng.random() < self.distractor_prob):
+            lo = 1 if used else 2
+            k = self.rng.randint(lo, min(max(self.max_distractors, lo), len(pool)))
             extras = self.rng.sample(pool, k)
 
         rename_params = self.rng.random() < self.param_rename_prob
@@ -275,7 +278,8 @@ def schema_block_from_tools(tools: list) -> str:
 
 
 def randomize_trace(text: str, rng: random.Random,
-                    sampler: "ToolSchemaSampler" = None) -> str:
+                    sampler: "ToolSchemaSampler" = None,
+                    force_schema: bool = False) -> str:
     """Rewrite a trace to use randomized tool names, prefixed by its schema.
 
     Applied as a post-processing pass so every generator benefits without each
@@ -289,7 +293,13 @@ def randomize_trace(text: str, rng: random.Random,
         if f'"name":"{canonical}"' in text or f"<tool name={canonical}>" in text:
             used.append(canonical)
     if not used:
-        return text
+        # A trace that calls nothing still needs the "tools were offered and
+        # the right move was to answer anyway" case, which is only learnable
+        # when a schema is present and unused.
+        if not force_schema:
+            return text
+        _, block = sampler.sample([])
+        return block + "\n" + text if block else text
     mapping, block = sampler.sample(used)
 
     # Longest first: "search_code" must not be rewritten by the "search_memory"

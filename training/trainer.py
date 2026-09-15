@@ -9,6 +9,70 @@ from tqdm import tqdm
 from training.device_utils import get_best_device
 
 
+class TokenBudgetSampler(torch.utils.data.Sampler):
+    """Batches of roughly constant TOKEN count, grouped by length.
+
+    ``collate_pad`` pads to the longest sequence in a batch, so a fixed batch
+    size over a wide length distribution is the worst case: with p50 826 and
+    p95 16,009 tokens, one long trace drags fifteen short ones to its length.
+    Grouping by length instead lets short traces ride in large batches and
+    long ones in small batches, both near ``max_tokens``.
+
+    This matters most for MoE, whose per-step Python loop over experts is
+    amortized by batch size: measured 6,149 tok/s at batch 2 x 832 against
+    36,169 at batch 16 x 1024 - a 5.9x difference from batching alone.
+
+    Sorting is done inside shuffled megabatches so the order still varies
+    between epochs rather than being a fixed length ramp.
+    """
+
+    def __init__(self, lengths, max_tokens, max_batch=64, shuffle=True,
+                 seed=0, mega=4096, drop_last=True):
+        self.lengths = list(lengths)
+        self.max_tokens = max_tokens
+        self.max_batch = max_batch
+        self.shuffle = shuffle
+        self.seed = seed
+        self.mega = mega
+        self.drop_last = drop_last
+        self.epoch = 0
+        self._batches = self._build()
+
+    def _build(self):
+        import random as _random
+        order = list(range(len(self.lengths)))
+        if self.shuffle:
+            _random.Random(self.seed + self.epoch).shuffle(order)
+        batches = []
+        for start in range(0, len(order), self.mega):
+            chunk = sorted(order[start:start + self.mega],
+                           key=lambda i: self.lengths[i])
+            cur, cur_max = [], 0
+            for i in chunk:
+                nxt_max = max(cur_max, self.lengths[i])
+                if cur and (nxt_max * (len(cur) + 1) > self.max_tokens
+                            or len(cur) >= self.max_batch):
+                    batches.append(cur)
+                    cur, cur_max = [i], self.lengths[i]
+                else:
+                    cur, cur_max = cur + [i], nxt_max
+            if cur:
+                batches.append(cur)
+        if self.shuffle:
+            _random.Random(self.seed + 977 + self.epoch).shuffle(batches)
+        return batches
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+        self._batches = self._build()
+
+    def __iter__(self):
+        return iter(self._batches)
+
+    def __len__(self):
+        return len(self._batches)
+
+
 class Trainer:
     """Train a tiny language model on sample stories.
 
@@ -35,7 +99,9 @@ class Trainer:
                  eval_every: int = 0,
                  eval_patience: int = 4,
                  max_minutes: float = 0.0,
-                 val_batches: int = 0):
+                 val_batches: int = 0,
+                 max_tokens: int = 0,
+                 max_batch: int = 64):
         if device is None:
             device = get_best_device()
         self.model = model.to(device)
@@ -84,7 +150,21 @@ class Trainer:
                          persistent_workers=num_workers > 0,
                          drop_last=True) if num_workers > 0 else {}
         self.sampler = None
-        if ddp:
+        self.batch_sampler = None
+        if max_tokens and not ddp:
+            base = dataset.dataset if hasattr(dataset, "dataset") else dataset
+            idx = dataset.indices if hasattr(dataset, "indices") else range(len(base))
+            lengths = [len(base.samples[i][0]) for i in idx]
+            self.batch_sampler = TokenBudgetSampler(lengths, max_tokens, max_batch,
+                                                    shuffle=True, seed=1234)
+            self.loader = DataLoader(dataset, batch_sampler=self.batch_sampler,
+                                     collate_fn=collator,
+                                     **{k: v for k, v in loader_kw.items()
+                                        if k != "drop_last"})
+            tok_est = sum(lengths) / max(1, len(self.batch_sampler))
+            print(f"token-budget batching: {len(self.batch_sampler):,} batches/epoch, "
+                  f"~{tok_est:,.0f} real tokens each (budget {max_tokens:,})")
+        elif ddp:
             from torch.utils.data.distributed import DistributedSampler
             # Each rank sees a disjoint shard, so the effective batch is
             # batch_size * grad_accum * world_size.
@@ -98,8 +178,24 @@ class Trainer:
                                      shuffle=True, collate_fn=collator,
                                      **loader_kw)
         if val_dataset is not None:
-            self.val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                                         shuffle=False, collate_fn=collator)
+            if max_tokens:
+                # The validation loader must respect the same token budget.
+                # With a fixed batch size it is the first thing to OOM: at
+                # batch 32 and a 19k-token trace the cross-entropy alone wants
+                # ~20 GiB, and val runs at step 0, so the run dies before it
+                # has trained anything.
+                vbase = (val_dataset.dataset if hasattr(val_dataset, "dataset")
+                         else val_dataset)
+                vidx = (val_dataset.indices if hasattr(val_dataset, "indices")
+                        else range(len(vbase)))
+                vlens = [len(vbase.samples[i][0]) for i in vidx]
+                self.val_loader = DataLoader(
+                    val_dataset, collate_fn=collator,
+                    batch_sampler=TokenBudgetSampler(vlens, max_tokens, max_batch,
+                                                     shuffle=False, seed=0))
+            else:
+                self.val_loader = DataLoader(val_dataset, batch_size=batch_size,
+                                             shuffle=False, collate_fn=collator)
         else:
             self.val_loader = None
         self.ddp = ddp
@@ -358,6 +454,8 @@ class Trainer:
                 if self.sampler is not None:
                     # Reshuffle differently each epoch across ranks.
                     self.sampler.set_epoch(step)
+                if self.batch_sampler is not None:
+                    self.batch_sampler.set_epoch(step)
                 data_iter = iter(self.loader)
                 x, y, mask = next(data_iter)
             loss = self.train_step(x, y, mask, step)
