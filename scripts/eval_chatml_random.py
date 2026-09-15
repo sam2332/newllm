@@ -245,6 +245,11 @@ def main():
     short_ok = short_total = long_ok = long_total = 0
     long_f1 = short_f1 = 0.0
     hops_ok, hops_total = {}, {}
+    # The same buckets over grounded answers only. The shallow bucket is
+    # where the knowledge Q&A lives, and scoring a paragraph by string
+    # equality drags it down for a reason that has nothing to do with tool
+    # competence - which is the only thing the legacy baseline measured.
+    shops_ok, shops_total = {}, {}
     for i, idx in enumerate(picks, 1):
         tokens, _ = val_set.dataset.samples[val_set.indices[idx]]
         text = tok.decode(tokens)
@@ -273,6 +278,8 @@ def main():
             short_total += 1
             short_ok += hit
             short_f1 += f1
+            shops_total[bucket] = shops_total.get(bucket, 0) + 1
+            shops_ok[bucket] = shops_ok.get(bucket, 0) + hit
         else:
             long_total += 1
             long_ok += hit
@@ -306,10 +313,16 @@ def main():
               f"mean token F1 {long_f1/long_total:.2f}")
         print("     (F1 is the number to read for prose; exact match scores a "
               "correct paraphrase zero)")
-    print("by tool-calls in the reference trace:")
+    print("by tool-calls in the reference trace (all answers):")
     for b in ("0-1", "2-3", "4-7", "8+"):
         if hops_total.get(b):
             print(f"  {b:5s} {hops_ok.get(b,0):3d}/{hops_total[b]:3d}")
+    print("by tool-calls, GROUNDED answers only "
+          "(the like-for-like comparison against the legacy 41/100):")
+    for b in ("0-1", "2-3", "4-7", "8+"):
+        if shops_total.get(b):
+            n, d = shops_ok.get(b, 0), shops_total[b]
+            print(f"  {b:5s} {n:3d}/{d:3d}  ({100.0*n/d:.0f}%)")
 
 
 if __name__ == "__main__":
