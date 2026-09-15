@@ -27,7 +27,8 @@ import json
 import os
 import sys
 import time
-from multiprocessing import Pool
+from collections import deque
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 
 import numpy as np
 
@@ -108,8 +109,11 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     ds = load_dataset(args.dataset, name=args.config, split=args.split, streaming=True)
 
+    def _tok_str(n):
+        return f"{n/1e9:.2f}B" if n >= 1e9 else f"{n/1e6:.0f}M"
+
     notify(f"pretrain shard build started: {args.dataset} `{args.config}`, "
-           f"target {args.target_tokens/1e9:.1f}B tokens, {args.workers} workers",
+           f"target {_tok_str(args.target_tokens)} tokens, {args.workers} workers",
            tag="pretrain")
     t0 = time.time()
     total = 0
@@ -134,28 +138,63 @@ def main():
         shard_idx += 1
         fill = 0
 
-    with Pool(args.workers, initializer=_init, initargs=(args.tokenizer,)) as pool:
-        stream = batched(ds, args.batch, key=args.text_key)
-        for encoded in pool.imap_unordered(_encode, stream, chunksize=2):
-            for ids in encoded:
-                n = len(ids)
-                if fill + n > len(buf):
+    # ProcessPoolExecutor, not multiprocessing.Pool. When a Pool worker dies
+    # the parent blocks in imap_unordered forever waiting for a result that
+    # will never come: this build hung for 1h50m with every child a zombie
+    # and the parent in futex_do_wait, having written 9.5B perfectly good
+    # tokens and no manifest. An Executor raises BrokenProcessPool instead,
+    # so the shards and the manifest survive a dead worker.
+    stalled = False
+    try:
+        with ProcessPoolExecutor(args.workers, initializer=_init,
+                                 initargs=(args.tokenizer,)) as pool:
+            stream = batched(ds, args.batch, key=args.text_key)
+            # A bounded window of futures, submitted by hand. Executor.map
+            # consumes its whole input iterable up front, which against an
+            # endless stream queues the entire dataset before yielding one
+            # result; Pool.imap is lazy but deadlocks when a worker dies.
+            # This keeps laziness AND gets an exception instead of a hang.
+            inflight = deque()
+            depth = args.workers * 3
+            exhausted = False
+            while True:
+                while not exhausted and len(inflight) < depth:
+                    try:
+                        inflight.append(pool.submit(_encode, next(stream)))
+                    except StopIteration:
+                        exhausted = True
+                if not inflight:
+                    break
+                for ids in inflight.popleft().result():
+                    n = len(ids)
+                    if fill + n > len(buf):
+                        flush()
+                    buf[fill:fill + n] = np.asarray(ids, dtype=np.uint16)
+                    fill += n
+                    total += n
+                    docs += 1
+                if fill >= args.shard_tokens:
                     flush()
-                buf[fill:fill + n] = np.asarray(ids, dtype=np.uint16)
-                fill += n
-                total += n
-                docs += 1
-            if fill >= args.shard_tokens:
-                flush()
-            if total >= args.target_tokens:
-                break
-        pool.terminate()
+                if total >= args.target_tokens:
+                    for f in inflight:
+                        f.cancel()
+                    break
+    except (BrokenExecutor, OSError) as exc:                 # noqa: BLE001
+        # Keep what was tokenized: a partial corpus is still a corpus, and
+        # 9.5B of 10B tokens is not worth throwing away over a dead worker.
+        stalled = True
+        print(f"\n  worker pool broke ({type(exc).__name__}: {exc}); "
+              f"keeping {total/1e9:.2f}B tokens", flush=True)
+        notify(f":warning: shard build lost its worker pool at "
+               f"{total/1e9:.2f}B tokens - keeping what was written",
+               tag="pretrain")
     flush(final=True)
 
     del ds
     meta = {"dataset": args.dataset, "config": args.config,
             "tokenizer": args.tokenizer, "tokens": int(total),
-            "documents": int(docs), "shards": manifest, "dtype": "uint16"}
+            "documents": int(docs), "shards": manifest, "dtype": "uint16",
+            "complete": not stalled}
     json.dump(meta, open(os.path.join(args.out, "manifest.json"), "w"), indent=1)
     mins = (time.time() - t0) / 60
     print(f"\n{total/1e9:.2f}B tokens from {docs:,} documents in {mins:.1f} min "
