@@ -158,6 +158,32 @@ def norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower().rstrip("."))
 
 
+def token_f1(got: str, want: str) -> float:
+    """SQuAD-style token F1.
+
+    Exact match is the right instrument for a grounded answer ("2336") and
+    the wrong one for a paragraph: the model answered "If your async code is
+    not running in parallel, it may be because..." against a reference of
+    "If your code is not running in parallel, it may be because" and scored
+    zero for three characters. F1 states how much of the reference the answer
+    actually recovered, which is what we want to know about prose.
+    """
+    g = re.findall(r"[a-z0-9]+", norm(got))
+    w = re.findall(r"[a-z0-9]+", norm(want))
+    if not g or not w:
+        return 0.0
+    common = 0
+    pool = list(w)
+    for t in g:
+        if t in pool:
+            pool.remove(t)
+            common += 1
+    if not common:
+        return 0.0
+    prec, rec = common / len(g), common / len(w)
+    return 2 * prec * rec / (prec + rec)
+
+
 def run_trace(model, tok, tools, system, question, *, device, max_steps,
               max_new, seed):
     """Replay one conversation; return (final_answer, hops)."""
@@ -217,6 +243,7 @@ def main():
     tok = load_tokenizer_for(model)
     ok = skipped = 0
     short_ok = short_total = long_ok = long_total = 0
+    long_f1 = short_f1 = 0.0
     hops_ok, hops_total = {}, {}
     for i, idx in enumerate(picks, 1):
         tokens, _ = val_set.dataset.samples[val_set.indices[idx]]
@@ -241,12 +268,15 @@ def main():
         hit = bool(got) and (norm(got) == norm(expected)
                              or norm(expected) in norm(got))
         ok += hit
+        f1 = token_f1(got, expected)
         if short:
             short_total += 1
             short_ok += hit
+            short_f1 += f1
         else:
             long_total += 1
             long_ok += hit
+            long_f1 += f1
         hops_ok[bucket] = hops_ok.get(bucket, 0) + hit
         if args.verbose or (i <= 3):
             print(f"[{i}] {'OK ' if hit else 'MISS'} q={question[:70]!r}\n"
@@ -265,9 +295,12 @@ def main():
     if short_total:
         print(f"  short/grounded answers: {short_ok}/{short_total} "
               f"({100.0*short_ok/short_total:.0f}%)  <- comparable to the 41/100 bar")
+        print(f"     mean token F1 {short_f1/short_total:.2f}")
     if long_total:
-        print(f"  long free-text answers: {long_ok}/{long_total} "
-              f"(exact match is not a meaningful metric here)")
+        print(f"  long free-text answers: {long_ok}/{long_total} exact, "
+              f"mean token F1 {long_f1/long_total:.2f}")
+        print("     (F1 is the number to read for prose; exact match scores a "
+              "correct paraphrase zero)")
     print("by tool-calls in the reference trace:")
     for b in ("0-1", "2-3", "4-7", "8+"):
         if hops_total.get(b):
