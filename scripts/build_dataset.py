@@ -67,6 +67,13 @@ def main():
                     help="of the knowledge slice, the share that is pure Q&A "
                          "with no tool call; the rest are workspace code arcs")
     ap.add_argument("--knowledge-max-turns", type=int, default=24)
+    ap.add_argument("--hf-fraction", type=float, default=0.0,
+                    help="fraction of traces taken from imported datasets "
+                         "(scripts/import_hf_dataset.py). These keep their own "
+                         "tool names and schemas rather than ours")
+    ap.add_argument("--hf-traces",
+                    default="data/hf_openhermes.json,data/hf_xlam.json",
+                    help="one path or a comma-separated list")
     ap.add_argument("--tokenizer", default="byte",
                     help="'byte' or a path to an HF tokenizer.json")
     ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
@@ -84,7 +91,8 @@ def main():
         direct_fraction=args.direct_fraction,
         knowledge_fraction=args.knowledge_fraction, knowledge=args.knowledge,
         knowledge_explain_fraction=args.knowledge_explain_fraction,
-        knowledge_max_turns=args.knowledge_max_turns).items()
+        knowledge_max_turns=args.knowledge_max_turns,
+        hf_fraction=args.hf_fraction, hf_traces=args.hf_traces).items()
         if v not in (0, 0.0, None)} or None
 
     scenarios = args.scenarios if args.scenario_fraction else None

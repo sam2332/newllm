@@ -67,6 +67,7 @@ def _worker(args):
     tok = load_tokenizer(tokenizer_spec)
 
     traces = []
+    hf_traces = []          # kept apart: never renamed, they own their schemas
     if scenarios_path and scenario_fraction and os.path.exists(scenarios_path):
         from agent.scenario_traces import generate_from_scenarios
         from agent.tools import Toolbox
@@ -127,7 +128,36 @@ def _worker(args):
         direct = generate_direct_traces(n_direct, stories, seed=shard_seed + 13)
         traces.extend(direct)
 
-    remaining = max(0, n - len(traces))
+    # Imported outside datasets (scripts/import_hf_dataset.py). These carry
+    # their own tool schemas and their own names - xlam alone has 3,605 - so
+    # they are excluded from tool-name randomization below: the point of the
+    # data is names we did not invent, and renaming them to our thirteen would
+    # throw that away.
+    hf_fraction = extras.get("hf_fraction", 0.0)
+    hf_paths = extras.get("hf_traces")
+    n_hf = 0
+    if hf_fraction and hf_paths:
+        from agent.tool_schema import schema_block_from_entries
+        rows = []
+        for path in str(hf_paths).split(","):
+            path = path.strip()
+            if path and os.path.exists(path):
+                rows.extend(json.load(open(path)))
+        if rows:
+            rng_hf = random.Random(shard_seed + 31)
+            want = min(int(n * hf_fraction), len(rows))
+            picked = rng_hf.sample(range(len(rows)), want)
+            for i in picked:
+                row = rows[i]
+                text = row.get("trace") if isinstance(row, dict) else row
+                if not text:
+                    continue
+                block = schema_block_from_entries(row.get("tools")) \
+                    if isinstance(row, dict) else ""
+                hf_traces.append(block + "\n" + text if block else text)
+            n_hf = len(hf_traces)
+
+    remaining = max(0, n - len(traces) - len(hf_traces))
     if remaining:
         got, _ = generate(pool, remaining, mode=mode, max_len=max_len,
                           seed=shard_seed, deep_fraction=deep_fraction,
@@ -146,6 +176,7 @@ def _worker(args):
         n_forced = (n_direct + n_knowledge_direct) // 2
         traces = [randomize_trace(t, rng, sampler, force_schema=i < n_forced)
                   for i, t in enumerate(traces)]
+    traces.extend(hf_traces)
 
     # System-prompt families: persona voice and output-format rules. After
     # randomize_trace so the free-text block lands after the schema block.
@@ -196,7 +227,8 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
     ``char_budget``, ``persona_fraction``, ``personas`` (path),
     ``format_fraction``, ``direct_fraction``, ``knowledge`` (path),
     ``knowledge_fraction``, ``knowledge_explain_fraction``,
-    ``knowledge_max_turns``. All part of the cache key.
+    ``knowledge_max_turns``, ``hf_traces`` (comma-separated paths),
+    ``hf_fraction``. All part of the cache key.
 
     ``info``, if given, receives ``{"path", "key"}``. Callers must use this
     rather than recomputing the key: a caller that rebuilt the parameter dict

@@ -277,6 +277,29 @@ def schema_block_from_tools(tools: list) -> str:
     return _schema_block(entries) if entries else ""
 
 
+def schema_block_from_entries(tools: list) -> str:
+    """The system block for tools that came from outside this repo.
+
+    An imported dataset (``scripts/import_hf_dataset.py``) brings its own
+    function schemas - xlam alone has 3,605 distinct names - which are not in
+    any Toolbox and must not be renamed: the whole value of that data is that
+    the names are ones we never invented. This formats them through the same
+    ``_schema_block`` the live server uses, so an imported trace and a served
+    request cannot drift apart.
+    """
+    entries = []
+    for tool in tools or []:
+        fn = tool.get("function", tool) if isinstance(tool, dict) else {}
+        name = fn.get("name")
+        if not name:
+            continue
+        entries.append({"name": name,
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters")
+                        or {"type": "object", "properties": {}}})
+    return _schema_block(entries) if entries else ""
+
+
 def randomize_trace(text: str, rng: random.Random,
                     sampler: "ToolSchemaSampler" = None,
                     force_schema: bool = False) -> str:
