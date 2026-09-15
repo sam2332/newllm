@@ -56,6 +56,9 @@ CASES = [
 ]
 
 
+from scripts.eval_agent import require_legacy_protocol
+
+
 def load(path, device="cuda"):
     """One loader for every script (agent/chat.py), so new config keys such as
     rope_base, MoE and the tokenizer spec are honoured everywhere."""
@@ -111,6 +114,7 @@ if __name__ == "__main__":
         print(f"\n=== {path} ===")
         try:
             m = load(path)
+            require_legacy_protocol(m, "eval_chat.py")
             print(f"  params {m.count_parameters():,} arch_v{m.arch_version} "
                   f"max_len={m.max_len}")
             score(m, verbose=a.verbose, constrained=a.constrained,

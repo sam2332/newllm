@@ -44,6 +44,26 @@ def load(path, device="cuda"):
     return load_checkpoint(path, device=device)
 
 
+
+def require_legacy_protocol(model, script: str = "this eval"):
+    """Refuse to score a ChatML checkpoint with the legacy JSON harness.
+
+    A byte-tokenizer eval pointed at a BPE/ChatML checkpoint does not fail -
+    it decodes the trace into nonsense, finds no <assistant> block and
+    reports 0/0, which reads as "the model is broken" when nothing has been
+    asked of the model at all. That happened, and the hour it cost is the
+    reason this is an exception rather than a warning.
+    """
+    from agent.chat import load_tokenizer_for
+    from agent.turn import protocol_for
+    proto = protocol_for(load_tokenizer_for(model))
+    if proto != "json":
+        raise SystemExit(
+            f"{script} speaks the legacy JSON protocol, but this checkpoint "
+            f"was trained on {proto}.\n"
+            f"Use: .venv/bin/python scripts/eval_chatml_random.py "
+            f"<checkpoint> --cache <dataset cache>")
+
 def score(model, device="cuda", verbose=False, constrained=False,
           all_tools=True):
     # The model is trained with the full 12-tool set. Evaluating it against a

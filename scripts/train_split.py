@@ -123,6 +123,10 @@ def main():
     ap.add_argument("--max-len", type=int, default=None)
     ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--grad-accum", type=int, default=4)
+    ap.add_argument("--max-tokens", type=int, default=0,
+                    help="token budget per micro-batch; enables length-bucketed "
+                         "batching and overrides --batch-size (single GPU only)")
+    ap.add_argument("--max-batch", type=int, default=64)
     ap.add_argument("--lr", type=float, default=6e-4)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out", default=None)
@@ -166,6 +170,8 @@ def main():
     ap.add_argument("--persona-fraction", type=float, default=0.0)
     ap.add_argument("--personas", default="data/personas.json")
     ap.add_argument("--format-fraction", type=float, default=0.0)
+    ap.add_argument("--direct-fraction", type=float, default=0.0,
+                    help="fraction of traces that call no tool at all")
     ap.add_argument("--tokenizer", default="byte",
                     help="'byte' (legacy) or a path to an HF tokenizer.json")
     ap.add_argument("--protocol", default=None, choices=["json", "chatml"],
@@ -221,7 +227,8 @@ def main():
             project_fraction=args.project_fraction, stories=args.stories,
             max_turns=args.max_turns, char_budget=args.char_budget,
             persona_fraction=args.persona_fraction, personas=args.personas,
-            format_fraction=args.format_fraction).items()
+            format_fraction=args.format_fraction,
+        direct_fraction=args.direct_fraction).items()
             if v not in (0, 0.0, None)} or None)
     if args.dataset_cache:
         if is_main:
@@ -325,9 +332,14 @@ def main():
                       eval_fn=eval_fn, eval_every=args.eval_every,
                       eval_patience=args.eval_patience,
                       max_minutes=args.max_minutes,
-                      val_batches=args.val_batches)
-    print(f"batch={args.batch_size} x {args.grad_accum} "
-          f"(effective {args.batch_size * args.grad_accum}) lr={args.lr}")
+                      val_batches=args.val_batches,
+                      max_tokens=args.max_tokens, max_batch=args.max_batch)
+    if args.max_tokens:
+        print(f"token budget {args.max_tokens:,}/micro-batch x {args.grad_accum} "
+              f"(~{args.max_tokens * args.grad_accum:,} tokens/step) lr={args.lr}")
+    else:
+        print(f"batch={args.batch_size} x {args.grad_accum} "
+              f"(effective {args.batch_size * args.grad_accum}) lr={args.lr}")
 
     t0 = time.time()
     hist = trainer.train()

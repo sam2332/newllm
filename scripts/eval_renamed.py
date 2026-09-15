@@ -15,7 +15,7 @@ import torch
 from agent.tools import Toolbox
 from agent.agent_loop import run_agent
 from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
-from scripts.eval_agent import CASES, load
+from scripts.eval_agent import CASES, load, require_legacy_protocol
 
 # Same semantics, different surface names - what any real user would hand us.
 RENAMES = {
@@ -68,6 +68,7 @@ if __name__ == "__main__":
     ap.add_argument("checkpoint")
     a = ap.parse_args()
     m = load(a.checkpoint)
+    require_legacy_protocol(m, "eval_renamed.py")
     print(f"{a.checkpoint}  ({m.count_parameters():,} params)\n")
     base = score(m, Toolbox(), label="original names")
     ren = score(m, renamed_toolbox(RENAMES), label="renamed tools")

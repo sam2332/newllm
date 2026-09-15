@@ -16,9 +16,29 @@ fi
 # number to quote. The 17-case battery below cannot resolve finer than 5.9
 # points and 13 of its cases are single-hop toy questions, so it is a smoke
 # test, not an estimate of accuracy.
-echo "=== held-out traces (n=$N) ==="
-CUDA_VISIBLE_DEVICES="$GPU" .venv/bin/python -u scripts/eval_random.py \
-  "$CKPT" -n "$N" ${CACHE:+--cache "$CACHE"}
+# Which harness can read this checkpoint is a property of the checkpoint, not
+# a flag to remember: a byte-tokenizer eval pointed at a ChatML model reports
+# 0/0 without ever querying it, which reads as a broken model.
+PROTO=$(.venv/bin/python - "$CKPT" <<'PY'
+import sys, torch
+# Read the config only. Building the model to answer one question about the
+# tokenizer would load 2.2 GB of weights for nothing.
+ckpt = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
+cfg = ckpt.get("config", ckpt) if isinstance(ckpt, dict) else {}
+tok = (cfg or {}).get("tokenizer") or {}
+print("chatml" if tok.get("kind") == "bpe" else "json")
+PY
+) || PROTO=json
+
+echo "=== held-out traces (n=$N, protocol $PROTO) ==="
+if [ "$PROTO" = "chatml" ]; then
+  CUDA_VISIBLE_DEVICES="$GPU" .venv/bin/python -u scripts/eval_chatml_random.py \
+    "$CKPT" -n "$N" ${CACHE:+--cache "$CACHE"}
+  BATTERY=0
+else
+  CUDA_VISIBLE_DEVICES="$GPU" .venv/bin/python -u scripts/eval_random.py \
+    "$CKPT" -n "$N" ${CACHE:+--cache "$CACHE"}
+fi
 
 if [ "${BATTERY:-1}" = "1" ]; then
   echo; echo "=== 17-case battery (smoke test) ==="

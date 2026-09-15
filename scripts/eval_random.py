@@ -31,7 +31,7 @@ from agent.sandbox_tools import attach_sandbox_tools
 from agent.tokenizer import DEFAULT_AGENT_TOKENIZER as TOK
 from agent.tool_schema import NAME_POOLS
 from agent.tools import Toolbox
-from scripts.eval_agent import load
+from scripts.eval_agent import load, require_legacy_protocol
 
 SURFACE_TO_CANONICAL = {s: c for c, names in NAME_POOLS.items() for s in names}
 
@@ -110,6 +110,8 @@ def main():
     picks = rng.sample(range(len(val_set)), min(args.n, len(val_set)))
 
     model = load(args.checkpoint, device=args.device)
+
+    require_legacy_protocol(model, "eval_random.py")
     ok = skipped = 0
     hops_ok, hops_total = {}, {}
     for i, idx in enumerate(picks, 1):
