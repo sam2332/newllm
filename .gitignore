@@ -41,3 +41,8 @@ data/*.partial.json
 # The webhook URL is a credential: anyone with it can post to the channel.
 # config.example.json is the committed template.
 config.json
+
+# A stray character in the name (config..json) left a live webhook URL
+# outside the ignore rule and one "git add -A" from being published.
+config*.json
+!config.example.json

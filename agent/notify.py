@@ -67,8 +67,14 @@ def _discord_config() -> dict:
     d = cfg.get("discord") or {}
     # The environment wins, so a one-off run can post somewhere else without
     # editing a file that other processes are reading.
-    url = os.environ.get("DISCORD_WEBHOOK_URL") or d.get("webhook_url")
+    url = os.environ.get("DISCORD_WEBHOOK_URL") or d.get("webhook_url") or ""
+    # Pasted URLs pick up quotes, backticks and stray leading characters; one
+    # of those turned every post into a 403 that looked like a bad token.
+    url = url.strip().lstrip("~`'\" \t")
     if not url or d.get("enabled") is False:
+        return {}
+    if not url.startswith(("http://", "https://")):
+        _warn_once(f"webhook_url does not look like a URL (starts {url[:8]!r})")
         return {}
     return {"url": url,
             "username": d.get("username", "newllm"),
@@ -84,10 +90,16 @@ def _warn_once(msg: str):
           file=sys.stderr, flush=True)
 
 
+# Discord's edge rejects the default "Python-urllib/3.x" with a bare 403,
+# which reads exactly like a bad webhook token. Identify properly instead.
+USER_AGENT = "newllm-notify (https://github.com/sam2332/newllm, 1.0)"
+
+
 def _post(url: str, payload: dict, timeout: float = 10.0):
     body = json.dumps(payload).encode()
     req = urlrequest.Request(url, data=body,
-                             headers={"Content-Type": "application/json"})
+                             headers={"Content-Type": "application/json",
+                                      "User-Agent": USER_AGENT})
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         resp.read()
 
