@@ -13,11 +13,11 @@ OUT=checkpoints_pretrain_L24
 LOG=logs/pretrain_L24.log
 # Saves every 5,000 iters (~15 min): a reboot at 23 min into the first run
 # lost everything because the first save was due at 10,000.
-PRE_ARGS=(--size L24 --seq-len 2048 --batch-size 4 --grad-accum 16 --iters 1150000
-          --lr 4e-4 --warmup 16000 --val-windows 2000 --val-batches 40
-          --save-every 5000 --out "$OUT")
+PRE_ARGS=(--size L24 --seq-len 2048 --batch-size 4 --grad-accum 8 --iters 200000
+          --lr 4e-4 --warmup 8000 --val-windows 2000 --val-batches 40
+          --save-every 5000 --compile --out "$OUT")
 say() { .venv/bin/python -c "import sys; sys.path.insert(0,'.'); from agent.notify import notify; notify(sys.argv[1], tag='pipeline', blocking=True)" "$1"; echo "$1"; }
-running() { pgrep -f "^.venv/bin/python -u scripts/pretrain.py --size L24" >/dev/null; }
+running() { pgrep -f "scripts/pretrain.py --size L24" >/dev/null; }
 done_pretrain() { [ -f "$OUT/run.json" ]; }
 
 # Everything already done: exit, so a boot-time start does not redo the SFT.
@@ -34,8 +34,11 @@ while ! done_pretrain; do
   else
     say "pretrain L24 starting from scratch (no saved state yet)"
   fi
-  CUDA_VISIBLE_DEVICES=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-    .venv/bin/python -u scripts/pretrain.py "${PRE_ARGS[@]}" "${RESUME[@]}" 2>&1 | tee -a "$LOG"
+  # Both GPUs (DDP): the power was fixed with the PSU swap and a 20-minute
+  # dual load held. iters/grad-accum are per rank, halved from the 1-GPU run
+  # so tokens per optimizer step and the total stay the same.
+  CUDA_VISIBLE_DEVICES=0,1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    .venv/bin/torchrun --standalone --nproc_per_node=2 scripts/pretrain.py "${PRE_ARGS[@]}" "${RESUME[@]}" 2>&1 | tee -a "$LOG"
   # A crash exits non-zero: leave, and let systemd restart after its back-off
   # rather than spinning here.
   [ "${PIPESTATUS[0]}" = 0 ] || { say "pretrain L24 exited with an error"; exit 1; }

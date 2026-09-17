@@ -355,6 +355,11 @@ class Trainer:
             return True
         return False
 
+    def _is_rank0(self):
+        import torch.distributed as dist
+        return not (dist.is_available() and dist.is_initialized()) \
+            or dist.get_rank() == 0
+
     def _unwrapped(self):
         return getattr(self.model, "module", self.model)
 
@@ -366,7 +371,7 @@ class Trainer:
         than having none.
         """
         import os
-        if not self.checkpoint_path:
+        if not self.checkpoint_path or not self._is_rank0():
             return
         target = self.checkpoint_path + ".resume"
         tmp = target + ".tmp"
@@ -434,15 +439,23 @@ class Trainer:
         x, y, mask = x.to(self.device), y.to(self.device), mask.to(self.device)
         self.model.train()
 
-        with torch.amp.autocast("cuda", enabled=self.use_amp,
-                                dtype=self.amp_dtype):
-            out = self.model(x)
-            loss = self._compute_loss(out, y, mask)
-            loss = loss / self.grad_accum_steps
+        # Under DDP, all-reduce only on the micro-batch that steps the
+        # optimizer. Syncing every micro-batch over PCIe (no NVLink here)
+        # would cost a full gradient transfer grad_accum times per step.
+        import contextlib
+        stepping = (step + 1) % self.grad_accum_steps == 0
+        sync = (self.model.no_sync() if self.ddp and not stepping
+                else contextlib.nullcontext())
+        with sync:
+            with torch.amp.autocast("cuda", enabled=self.use_amp,
+                                    dtype=self.amp_dtype):
+                out = self.model(x)
+                loss = self._compute_loss(out, y, mask)
+                loss = loss / self.grad_accum_steps
 
-        self.scaler.scale(loss).backward()
+            self.scaler.scale(loss).backward()
 
-        if (step + 1) % self.grad_accum_steps == 0:
+        if stepping:
             self.scaler.unscale_(self.optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), 1.0)
@@ -489,7 +502,8 @@ class Trainer:
         budget = self.max_minutes * 60 if self.max_minutes else 0
         data_iter = iter(self.loader)
         pbar = tqdm(range(self.start_step, self.max_iters), desc="training",
-                    initial=self.start_step, total=self.max_iters)
+                    initial=self.start_step, total=self.max_iters,
+                    disable=rank != 0)
         for step in pbar:
             try:
                 x, y, mask = next(data_iter)
@@ -580,10 +594,12 @@ class Trainer:
                 k: v.detach().cpu().clone()
                 for k, v in self._unwrapped().state_dict().items()
             }
+        if not self._is_rank0():
+            return
         torch.save({
             "model": self._best_model_state,
-            "config": self.model._get_config()
-            if hasattr(self.model, "_get_config") else {},
+            "config": self._unwrapped()._get_config()
+            if hasattr(self._unwrapped(), "_get_config") else {},
         }, path)
 
     def generate(self, prompt: str, max_new: int = 20,

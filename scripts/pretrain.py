@@ -52,13 +52,31 @@ def main():
     ap.add_argument("--arch-version", type=int, default=3)
     ap.add_argument("--rope-base", type=float, default=1e6)
     ap.add_argument("--max-minutes", type=float, default=0.0)
+    ap.add_argument("--compile", action="store_true",
+                    help="torch.compile each layer in place (state_dict keys unchanged)")
     ap.add_argument("--resume", action="store_true",
                     help="continue from <out>/pretrain_best.pt.resume")
     ap.add_argument("--out", default="checkpoints_pretrain")
     args = ap.parse_args()
 
-    from agent.notify import notify
+    from agent.notify import notify as _notify
     from agent.tokenizer_registry import load_tokenizer, spec_for
+
+    # torchrun sets LOCAL_RANK; one process per GPU, each on a disjoint shard.
+    local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    ddp = local_rank >= 0
+    rank0 = True
+    device = None
+    if ddp:
+        import torch.distributed as dist
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(local_rank)
+        device = f"cuda:{local_rank}"
+        rank0 = dist.get_rank() == 0
+    notify = _notify if rank0 else (lambda *a, **k: False)
+    if not rank0:
+        import builtins
+        builtins.print = lambda *a, **k: None
 
     os.makedirs(args.out, exist_ok=True)
     tok = load_tokenizer(args.tokenizer)
@@ -80,11 +98,17 @@ def main():
                         n_kv_heads=max(1, cfg["n_heads"] // 4), qk_norm=True,
                         grad_checkpoint=args.grad_checkpoint, **cfg)
     model.tokenizer_spec = spec
+    if args.compile:
+        # Module.compile() compiles in place, so checkpoints keep plain keys
+        # and load without a torch.compile wrapper.
+        for layer in model.layers:
+            layer.compile()
+    world = dist.get_world_size() if ddp else 1
     n_params = model.count_parameters()
     # An iter is one micro-batch: Trainer steps the optimizer every
     # grad_accum iters. Counting accum here once reported the M run as 9.44B
     # tokens when it had seen 2.36B.
-    tokens_per_step = args.batch_size * args.seq_len
+    tokens_per_step = args.batch_size * args.seq_len * world
     planned = args.iters * tokens_per_step
     print(f"model: {n_params:,} parameters, vocab {tok.vocab_size}, "
           f"seq_len {args.seq_len}")
@@ -98,6 +122,9 @@ def main():
 
     import shutil
     shutil.copy(args.tokenizer, os.path.join(args.out, "tokenizer.json"))
+    if ddp:
+        from torch.nn.parallel import DistributedDataParallel
+        model = DistributedDataParallel(model.to(device), device_ids=[local_rank])
 
     ckpt_path = os.path.join(args.out, "pretrain_best.pt")
     trainer = Trainer(model, train_set, val_dataset=val_set,
@@ -106,7 +133,7 @@ def main():
                       save_every=args.save_every, val_batches=args.val_batches,
                       notify_every_min=args.notify_every_min,
                       checkpoint_path=ckpt_path, resume=args.resume,
-                      max_minutes=args.max_minutes)
+                      max_minutes=args.max_minutes, ddp=ddp, device=device)
     notify(f"pretrain started: {args.size} {n_params/1e6:.0f}M, "
            f"{planned/1e9:.2f}B tokens over {args.iters:,} iters "
            f"({planned/n_params:.0f} tok/param)", tag="pretrain")
@@ -115,6 +142,9 @@ def main():
     dt = time.time() - t0
 
     trainer.save_best_val(ckpt_path)
+    if not rank0:
+        dist.destroy_process_group()
+        return
     meta = {"size": args.size, "params": n_params, "seq_len": args.seq_len,
             "iters": args.iters, "lr": args.lr, "tokens": int(planned),
             "corpus_tokens": int(ds.tokens), "tokenizer": spec,
@@ -126,6 +156,8 @@ def main():
     notify(f":white_check_mark: **pretrain finished** {args.size}, "
            f"best val {trainer.best_val_loss:.4f} in {dt/3600:.1f}h -> "
            f"`{args.out}/pretrain_best.pt`", tag="pretrain", blocking=True)
+    if ddp:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
