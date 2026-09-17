@@ -145,9 +145,19 @@ def _worker(args):
             if path and os.path.exists(path):
                 rows.extend(json.load(open(path)))
         if rows:
-            rng_hf = random.Random(shard_seed + 31)
             want = min(int(n * hf_fraction), len(rows))
-            picked = rng_hf.sample(range(len(rows)), want)
+            if extras.get("hf_disjoint"):
+                # One permutation shared by every shard, sliced by shard index,
+                # so no row appears twice until the whole import has been used.
+                # Independent per-shard samples duplicated ~20% of rows at a
+                # 55% share, which is repetition this project cannot afford.
+                perm = list(range(len(rows)))
+                random.Random(seed * 1000 + 31).shuffle(perm)
+                start = shard_idx * want
+                picked = [perm[(start + j) % len(perm)] for j in range(want)]
+            else:
+                rng_hf = random.Random(shard_seed + 31)
+                picked = rng_hf.sample(range(len(rows)), want)
             for i in picked:
                 row = rows[i]
                 text = row.get("trace") if isinstance(row, dict) else row
@@ -274,8 +284,15 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
     # map() is safe here (unlike over a stream) because jobs is a finite list.
     from concurrent.futures import ProcessPoolExecutor
     ctx = mp.get_context("spawn")
+    from agent.notify import Progress
+    progress = Progress("dataset build", shards, tag="data",
+                        start_detail=f"{samples:,} {mode} samples, {protocol}, "
+                                     f"{shards} shards")
+    results = []
     with ProcessPoolExecutor(workers, mp_context=ctx) as pool_proc:
-        results = list(pool_proc.map(_worker, jobs))
+        for shard in pool_proc.map(_worker, jobs):
+            results.append(shard)
+            progress.update(len(results), "shards")
     data = [item for shard in results for item in shard]
     dt = time.time() - t0
     if verbose:
@@ -296,6 +313,7 @@ def build(samples, mode="instruct", pool_path="data/ollama_pool.json",
                   open(path.replace(".pt", ".json"), "w"), indent=1)
         if verbose:
             print(f"  cached -> {path}", flush=True)
+    progress.finish(f"{len(data):,} samples" + (f" -> {path}" if cache else ""))
     return data
 
 

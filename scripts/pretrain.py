@@ -44,6 +44,8 @@ def main():
     ap.add_argument("--warmup", type=int, default=2000)
     ap.add_argument("--val-windows", type=int, default=2000)
     ap.add_argument("--val-batches", type=int, default=40)
+    ap.add_argument("--notify-every-min", type=float, default=10.0,
+                    help="minutes between progress posts to the webhook (0 disables the timer; posts at 25/50/75%% still go out)")
     ap.add_argument("--save-every", type=int, default=1000)
     ap.add_argument("--grad-checkpoint", action="store_true")
     ap.add_argument("--limit-tokens", type=int, default=0)
@@ -79,12 +81,16 @@ def main():
                         grad_checkpoint=args.grad_checkpoint, **cfg)
     model.tokenizer_spec = spec
     n_params = model.count_parameters()
-    tokens_per_step = args.batch_size * args.grad_accum * args.seq_len
+    # An iter is one micro-batch: Trainer steps the optimizer every
+    # grad_accum iters. Counting accum here once reported the M run as 9.44B
+    # tokens when it had seen 2.36B.
+    tokens_per_step = args.batch_size * args.seq_len
     planned = args.iters * tokens_per_step
     print(f"model: {n_params:,} parameters, vocab {tok.vocab_size}, "
           f"seq_len {args.seq_len}")
     amount = (f"{planned/1e9:.2f}B" if planned >= 1e9 else f"{planned/1e6:.0f}M")
-    print(f"{tokens_per_step:,} tokens/step x {args.iters:,} iters = "
+    print(f"{tokens_per_step:,} tokens/iter x {args.iters:,} iters "
+          f"({args.iters // args.grad_accum:,} optimizer steps) = "
           f"{amount} tokens ({planned/ds.tokens:.2f} epochs, "
           f"{planned/n_params:.0f} tokens/param)")
     # Dropout is 0 here on purpose: with 9.5B tokens against 561M parameters
@@ -98,6 +104,7 @@ def main():
                       batch_size=args.batch_size, grad_accum_steps=args.grad_accum,
                       max_iters=args.iters, lr=args.lr, warmup_steps=args.warmup,
                       save_every=args.save_every, val_batches=args.val_batches,
+                      notify_every_min=args.notify_every_min,
                       checkpoint_path=ckpt_path, resume=args.resume,
                       max_minutes=args.max_minutes)
     notify(f"pretrain started: {args.size} {n_params/1e6:.0f}M, "

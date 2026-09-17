@@ -26,6 +26,9 @@ PROMPTS = [
     ("knowledge-python", [{"role": "user", "content": "What is a Python generator?"}]),
     ("knowledge-bash", [{"role": "user", "content": "What does set -e do in a bash script?"}]),
     ("knowledge-science", [{"role": "user", "content": "What is photosynthesis?"}]),
+    # The target the project is steered by: right answer is Rayleigh
+    # scattering - shorter (blue) wavelengths scatter more off air molecules.
+    ("sky", [{"role": "user", "content": "Why is the sky blue?"}]),
     ("principle", [{"role": "user", "content": "What does DRY mean in programming?"}]),
     ("instruction", [{"role": "user", "content": "List three fruits."}]),
     ("system-prompt", [

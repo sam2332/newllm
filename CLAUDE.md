@@ -31,6 +31,14 @@ rules below.
   `scripts/run/`.
 - **Report held-out numbers, not the 17-case battery**, where one case is worth
   5.9 points.
+- **Long runs survive logout only with linger on, and belong in named `screen`
+  sessions.** Without `loginctl enable-linger`, systemd kills the user slice at
+  logout even through `nohup`/`setsid`; the telltale is a log that stops at
+  exactly 4096 bytes. After any hard reboot run `git fsck` - a power cut has
+  corrupted this repo once.
+- **Callers of the dataset builder need a file and a `__main__` guard.** It fans
+  out over a spawn process pool whose workers re-import `__main__` by path, so
+  code piped in on stdin crashes every worker.
 
 ## Commands
 
@@ -40,7 +48,15 @@ scripts/run/02_build_dataset.sh      # tokenize traces into a cache
 scripts/run/03_train.sh              # detached, one GPU
 scripts/run/04_eval.sh <checkpoint>  # picks the harness from the checkpoint
 scripts/run/05_export.sh <checkpoint> # GGUF + equivalence test (needs Ollama up)
+
+# two-stage path: pretrain, then SFT on top of the base
+scripts/run/06_pretrain.sh           # stage 1, FineWeb-Edu shards, ~24 h
+INIT=checkpoints_pretrain/pretrain_best.pt scripts/run/07_sft.sh
+screen -dmS sft env FOREGROUND=1 scripts/run/07_sft.sh   # stage 2 in the foreground
 ```
+
+First-time venv setup (Python 3.12, cu128 torch) and power caps are in
+[scripts/run/README.md](scripts/run/README.md).
 
 Everything is overridable by environment variable
 (`ITERS=80000 SIZE=L-moe scripts/run/03_train.sh`).
@@ -105,8 +121,9 @@ most of the batch on padding or OOMs on the long tail. MoE needs large batches
 the old dense byte model wanted). The LR schedule is warmup then cosine to
 0.1x across `--iters`, so **the iteration count must be right at launch**:
 stopping a too-long run early leaves the weights where a near-peak LR put them.
-Epochs are `batches_per_epoch / grad_accum`, which is easy to misjudge by an
-order of magnitude.
+An iter is **one micro-batch**, not an optimizer step, so epochs are
+`iters / batches_per_epoch` and tokens are `iters x batch x seq_len` - both
+were once computed with an extra `x grad_accum`, overstating them 4-16x.
 
 **Model** (`model/`): `arch_version=3` is Qwen3-isomorphic so GGUF export is a
 name mapping - no attention bias, half-split NEOX RoPE at base 1e6, no
@@ -119,7 +136,9 @@ breaks `scripts/export_gguf.py`, which is the point of the whole exercise.
 plus `/v1/chat/completions`) over `generate_turn`, so the `ollama` Python
 client, `ollama run` and OpenAI-shaped clients all work against a checkpoint.
 
-**Pretraining** (added late, still being wired into training):
+**Pretraining** (stage 1 via `scripts/pretrain.py` / `06_pretrain.sh`; stage 2
+`07_sft.sh` deliberately keeps the synthetic slices a minority, with imported
+OpenHermes conversations and xlam tool calls carrying the weight):
 `scripts/build_pretrain_shards.py` streams FineWeb-Edu, tokenizes with the
 project BPE, and packs ids into flat `uint16` shards with EOT as the document
 separator. `data/pretrain/manifest.json` describes them. This exists because

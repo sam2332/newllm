@@ -18,6 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 from scripts.gen_data_ollama import (ENDPOINTS, ollama_chat, parse_json_array,
                                      save_atomic)
 
@@ -123,6 +124,7 @@ def main():
           f"{len(existing)} already in {args.out}")
     t0 = time.time()
     new, errors = [], 0
+    progress = Progress("persona teacher", len(jobs), tag="teacher")
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(ollama_chat, PROMPT.format(n=args.per_seed, seed=seed),
                           args.model, endpoints[i % len(endpoints)], 1.0,
@@ -130,6 +132,7 @@ def main():
                 for i, (seed, _) in enumerate(jobs)}
         for done, fut in enumerate(as_completed(futs), 1):
             seed = futs[fut]
+            progress.update(done, f"{len(new)} new, {errors} failed")
             try:
                 arr = json.loads(fut.result()).get("personas", [])
             except Exception as exc:                            # noqa: BLE001
@@ -153,6 +156,7 @@ def main():
     save_atomic(out, args.out)
     print(f"\n{len(new)} new personas ({errors} failed requests) in "
           f"{(time.time()-t0)/60:.1f} min -> {args.out} ({len(out)} total)")
+    progress.finish(f"{len(new)} new personas, {errors} failed -> {args.out}")
 
 
 if __name__ == "__main__":

@@ -93,7 +93,7 @@ class Trainer:
                  num_workers: int = 4,
                  checkpoint_path: str = None,
                  save_every: int = 0,
-                 notify_every_min: float = 30.0,
+                 notify_every_min: float = 10.0,
                  resume: bool = False,
                  ddp: bool = False,
                  eval_fn=None,
@@ -241,9 +241,12 @@ class Trainer:
     def _report_horizon(self, max_iters: int, grad_accum: int):
         """Say how many epochs --iters actually is, and complain if it is wild.
 
-        Epochs are batches_per_epoch / grad_accum, which is easy to misjudge:
-        150,000 iters was described in this repo's own notes as "2.5 epochs"
-        and is nearer 18. The LR schedule is warmup then cosine to 0.1x across
+        An iter is ONE micro-batch - the loop pulls a batch per iter and steps
+        the optimizer every grad_accum iters - so epochs are
+        max_iters / batches_per_epoch. This used to divide batches by
+        grad_accum as well, which overstated epochs by that factor (a 0.99
+        epoch pretrain was reported as 15.9, and the M pretrain as 9.44B
+        tokens when it saw 2.36B). The LR schedule is warmup then cosine to 0.1x across
         max_iters, so a horizon that is wrong at launch cannot be fixed by
         stopping the run early - the weights never anneal.
         """
@@ -252,10 +255,10 @@ class Trainer:
                 else len(self.loader)
         except TypeError:
             return
-        steps_per_epoch = max(1, batches // max(1, grad_accum))
-        epochs = max_iters / steps_per_epoch
-        print(f"horizon: {max_iters:,} iters = {epochs:.1f} epochs "
-              f"({steps_per_epoch:,} optimizer steps/epoch)")
+        epochs = max_iters / max(1, batches)
+        print(f"horizon: {max_iters:,} iters = {epochs:.2f} epochs "
+              f"({batches:,} micro-batches/epoch, "
+              f"{max_iters // max(1, grad_accum):,} optimizer steps)")
         if epochs > 10:
             print(f"  WARNING: {epochs:.0f} epochs over one corpus is deep into "
                   f"memorisation for most sizes. The cosine schedule runs to "
@@ -520,15 +523,22 @@ class Trainer:
             pbar.set_postfix(postfix)
             # Paced by minutes, not steps: a step-count interval reports every
             # few seconds early on and once an hour late on.
-            if self.notify_every_min and time.time() - last_ping >= self.notify_every_min * 60:
+            # Also at each quarter, so a run shorter than the interval still
+            # reports mid-way instead of going silent until it finishes.
+            quarter = (4 * (step + 1)) // self.max_iters > (4 * step) // self.max_iters \
+                and step + 1 < self.max_iters
+            if quarter or (self.notify_every_min
+                           and time.time() - last_ping >= self.notify_every_min * 60):
                 last_ping = time.time()
                 done = step - self.start_step + 1
                 total = max(1, self.max_iters - self.start_step)
                 rate = done / max(1e-9, time.time() - t_start)
                 eta_min = (total - done) / rate / 60 if rate else 0
-                speak(f"step {step:,}/{self.max_iters:,} ({100.0*step/self.max_iters:.1f}%) "
+                speak(f"step {step+1:,}/{self.max_iters:,} ({100.0*(step+1)/self.max_iters:.1f}%) "
                       f"loss {loss:.4f} best {self.best_loss:.4f} "
-                      f"val {self.best_val_loss:.4f} ETA {eta_min/60:.1f}h", tag="train")
+                      f"val {self.best_val_loss:.4f} ETA "
+                      + (f"{eta_min/60:.1f}h" if eta_min >= 90 else f"{eta_min:.0f}m"),
+                      tag="train")
             if self.save_every and step and step % self.save_every == 0:
                 self._save_resume_state(step)
 

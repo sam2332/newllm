@@ -34,6 +34,7 @@ import re
 import sys
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 
 from agent.chat_dataset import serialize_chat
 
@@ -220,6 +221,7 @@ def main():
         return
 
     traces, tools_seen, skipped = [], 0, 0
+    progress = Progress(f"import {args.dataset}", args.limit, tag="import")
     for i, row in enumerate(ds):
         if len(traces) >= args.limit:
             break
@@ -232,6 +234,7 @@ def main():
             skipped += 1
             continue
         traces.append({"trace": trace, "tools": tools})
+        progress.update(len(traces), f"{skipped:,} skipped")
         tools_seen += bool(tools)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
@@ -239,6 +242,7 @@ def main():
     chars = sum(len(t["trace"]) for t in traces)
     print(f"{len(traces):,} traces ({tools_seen:,} with tool schemas), "
           f"{skipped:,} skipped, {chars/1e6:.1f} MB -> {args.out}")
+    progress.finish(f"{len(traces):,} traces, {chars/1e6:.1f} MB -> {args.out}")
 
 
 if __name__ == "__main__":

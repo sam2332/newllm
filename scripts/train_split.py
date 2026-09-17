@@ -36,6 +36,10 @@ PRESETS = {
     "M": dict(d_model=768, n_layers=12, n_heads=12, d_ff=3072),
     "L": dict(d_model=1024, n_layers=12, n_heads=16, d_ff=4096),
     "XL": dict(d_model=2048, n_layers=20, n_heads=16, d_ff=8192),
+    # L's width at twice the depth: ~380M, the largest dense model this
+    # machine can pretrain on one GPU in days rather than weeks. Depth over
+    # width because multi-turn coherence and tool chains are compositional.
+    "L24": dict(d_model=1024, n_layers=24, n_heads=16, d_ff=4096),
     # Mixture-of-experts presets (arch_version=3, qwen3moe layout). Measured
     # at the mean BPE trace length, batch 2, grad checkpointing:
     #   L-moe        464M total / 152M active   292 ms/step   7.1 GiB
@@ -152,6 +156,8 @@ def main():
                     help="score the task battery every N steps (0 = off)")
     ap.add_argument("--eval-patience", type=int, default=4,
                     help="stop after this many evals with no improvement")
+    ap.add_argument("--notify-every-min", type=float, default=10.0,
+                    help="minutes between progress posts to the webhook (0 disables the timer; posts at 25/50/75%% still go out)")
     ap.add_argument("--save-every", type=int, default=250,
                     help="write resumable state every N iterations (0 = off)")
     ap.add_argument("--resume", action="store_true",
@@ -328,6 +334,7 @@ def main():
                       weight_decay=0.1, betas=(0.9, 0.95), num_workers=4,
                       checkpoint_path=path if is_main else None,
                       save_every=args.save_every if is_main else 0,
+                      notify_every_min=args.notify_every_min,
                       resume=args.resume, ddp=ddp,
                       eval_fn=eval_fn, eval_every=args.eval_every,
                       eval_patience=args.eval_patience,

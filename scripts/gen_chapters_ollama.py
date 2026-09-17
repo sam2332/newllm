@@ -21,6 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 from scripts.gen_data_ollama import (ENDPOINTS, ollama_chat, parse_json_array,
                                      save_atomic)
 
@@ -175,6 +176,7 @@ def main():
     jobs = [(si, ci) for si, s in enumerate(stories) for ci in range(len(s["chapters"]))
             if not s["chapters"][ci].get("text")]
     print(f"{len(jobs)} chapters to write", flush=True)
+    progress = Progress("chapter teacher", len(jobs), tag="teacher")
     done_n, failed, since_save = 0, 0, 0
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(gen_chapter, args.model, stories[si], ci, args.min_chars,
@@ -197,6 +199,7 @@ def main():
             if since_save >= args.save_every:
                 save_atomic(stories, partial_path)
                 since_save = 0
+            progress.update(done_n, f"{failed} failed")
             if done_n % 25 == 0:
                 print(f"  chapters [{done_n}/{len(jobs)}] failed {failed} "
                       f"elapsed {(time.time()-t0)/60:.1f} min", flush=True)
@@ -209,6 +212,7 @@ def main():
     print(f"\n{len(complete)} complete stories, {sum(len(s['chapters']) for s in complete)} "
           f"chapters, {chars/1e6:.1f} MB prose in {(time.time()-t0)/60:.1f} min "
           f"-> {args.out} ({len(out)} total)")
+    progress.finish(f"{len(complete)} stories, {chars/1e6:.1f} MB -> {args.out}")
 
 
 if __name__ == "__main__":

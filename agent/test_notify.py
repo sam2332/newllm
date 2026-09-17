@@ -89,3 +89,23 @@ def test_bad_config_file_is_treated_as_absent(tmp_path, monkeypatch):
     p.write_text("{not json")
     monkeypatch.setenv("NEWLLM_CONFIG", str(p))
     assert notify.load_config(str(p)) == {}
+
+
+def test_progress_posts_start_quarters_and_finish(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "notify", lambda msg, **k: sent.append(msg) or True)
+    p = notify.Progress("job", 100, every_min=1e9)
+    for i in range(1, 101):
+        p.update(i)
+    p.finish("done")
+    assert len(sent) == 5                     # start, 25, 50, 75, finish
+    assert "25/100" in sent[1] and "75/100" in sent[3] and "finished" in sent[4]
+
+
+def test_progress_without_total_is_paced_by_time(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "notify", lambda msg, **k: sent.append(msg) or True)
+    p = notify.Progress("open-ended", every_min=0)
+    assert p.update(1) and p.update(2)
+    p2 = notify.Progress("slow", every_min=1e9)
+    assert not p2.update(1)

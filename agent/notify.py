@@ -190,3 +190,47 @@ def notify_exception(context: str, exc: BaseException) -> bool:
 
 def enabled() -> bool:
     return bool(_discord_config())
+
+
+class Progress:
+    """Start, periodic and finish posts for a long job, on one schedule.
+
+    Posts when started, every ``every_min`` minutes, at each quarter of
+    ``total`` (so a job shorter than the interval still reports mid-way), and
+    at ``finish``. Every call is as safe as ``notify``: it never raises.
+    """
+
+    def __init__(self, what: str, total: int = None, *, tag: str = None,
+                 every_min: float = 10.0, start_detail: str = ""):
+        self.what, self.total, self.tag = what, total, tag
+        self.every_s = every_min * 60
+        self.t0 = self.last = time.time()
+        self.quarter = 0
+        notify(f"{what} started" + (f": {start_detail}" if start_detail else ""),
+               tag=tag)
+
+    @staticmethod
+    def _fmt(seconds: float) -> str:
+        m = seconds / 60
+        return f"{m/60:.1f}h" if m >= 90 else f"{m:.0f}m"
+
+    def update(self, done: int, detail: str = "") -> bool:
+        now = time.time()
+        q = (4 * done // self.total) if self.total else 0
+        crossed = self.total and q > self.quarter and done < self.total
+        if not crossed and now - self.last < self.every_s:
+            return False
+        self.quarter = max(self.quarter, q)
+        self.last = now
+        head = f"{self.what} {done:,}"
+        if self.total:
+            head += f"/{self.total:,} ({100.0 * done / self.total:.0f}%)"
+            if done:
+                head += f", ETA {self._fmt((now - self.t0) / done * (self.total - done))}"
+        return notify(head + (f" - {detail}" if detail else ""), tag=self.tag)
+
+    def finish(self, detail: str = "") -> bool:
+        return notify(f":white_check_mark: **{self.what} finished** in "
+                      f"{self._fmt(time.time() - self.t0)}"
+                      + (f" - {detail}" if detail else ""),
+                      tag=self.tag, blocking=True)

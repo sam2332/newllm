@@ -29,6 +29,7 @@ import re
 import sys
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 
 WP_TAG = re.compile(r"^\s*\[\s*(WP|EU|CW|TT|IP|RF|OT)\s*\]\s*", re.I)
 
@@ -97,6 +98,7 @@ def main():
 
     ds = load_dataset(args.dataset, split=args.split, streaming=True)
     out, seen, skipped = [], set(), 0
+    progress = Progress(f"import {args.dataset}", args.limit, tag="import")
     for row in ds:
         if len(out) >= args.limit:
             break
@@ -126,12 +128,14 @@ def main():
                           "summary": first_sentence(c),
                           "text": c} for i, c in enumerate(chapters)],
         })
+        progress.update(len(out), f"{skipped:,} skipped")
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     json.dump(out, open(args.out, "w"))
     n_ch = sum(len(s["chapters"]) for s in out)
     chars = sum(len(c["text"]) for s in out for c in s["chapters"])
     print(f"{len(out):,} stories, {n_ch:,} chapters, {chars/1e6:.1f} MB "
           f"({skipped:,} skipped) -> {args.out}")
+    progress.finish(f"{len(out):,} stories, {chars/1e6:.1f} MB -> {args.out}")
 
 
 if __name__ == "__main__":

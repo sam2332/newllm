@@ -30,6 +30,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 
 ENDPOINTS = ["http://localhost:11434", "http://localhost:11435"]
 _counter = threading.local()
@@ -294,6 +295,7 @@ def main():
     errors = []
     t0 = time.time()
     done = 0
+    progress = Progress("pool teacher", len(jobs), tag="teacher")
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {}
         for i, (kind, prompt) in enumerate(jobs):
@@ -304,6 +306,7 @@ def main():
         for fut in as_completed(futures):
             kind, result = fut.result()
             done += 1
+            progress.update(done, f"{len(errors)} errors")
             if isinstance(result, dict):
                 errors.append((kind, result["error"]))
                 print(f"  [{done}/{len(jobs)}] {kind}: {result['error'][:60]}")
@@ -338,6 +341,8 @@ def main():
     print(f"  facts       {len(pool['facts'])}")
     if errors:
         print(f"  errors      {len(errors)}")
+    progress.finish(f"{n_th} thoughts, {n_pp} paraphrases, "
+                    f"{len(pool['facts'])} facts, {len(errors)} errors")
     print(f"saved -> {args.out}")
 
 

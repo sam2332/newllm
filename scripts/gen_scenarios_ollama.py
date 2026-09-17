@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib import request as urlrequest
 
 sys.path.insert(0, "/home/lmeadows/llm")
+from agent.notify import Progress  # noqa: E402
 
 ENDPOINTS = ["http://localhost:11434", "http://localhost:11435"]
 
@@ -216,6 +217,8 @@ def main():
 
     print(f"budget {args.hours}h, {args.workers} workers across "
           f"{len(ENDPOINTS)} instances, {args.per_call} scenarios/call")
+    progress = Progress("scenario teacher", tag="teacher",
+                        start_detail=f"{args.hours}h budget")
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         pending = set()
         while time.time() < deadline or pending:
@@ -240,6 +243,7 @@ def main():
             os.replace(tmp, args.out)
             elapsed = time.time() - t0
             remain = max(0, deadline - time.time())
+            progress.update(len(plans), f"errors {errors}, {remain/60:.0f}m of budget left")
             print(f"  [{elapsed/60:5.1f}m] {len(plans):6,d} scenarios "
                   f"({len(plans)/max(elapsed,1)*3600:,.0f}/h) "
                   f"errors={errors} rejected={rejected} "
@@ -251,6 +255,7 @@ def main():
     print(f"  mean {steps/max(1,len(plans)):.1f} steps/scenario, "
           f"{turns/max(1,len(plans)):.1f} turns/scenario")
     print(f"saved -> {args.out}")
+    progress.finish(f"{len(plans):,} scenarios -> {args.out}")
 
 
 def _wait_any(pending):

@@ -57,7 +57,7 @@ Chinchilla wants 20:1. A bigger model on this corpus memorises harder.
 The plan these support: pretrain on the shards for base competence, then SFT on
 the instruct mix, with `coherence_probe.py` as the first gate rather than an
 afterthought. **Stage 1 is done**: `scripts/run/06_pretrain.sh` ran 72,000
-iters (9.44B tokens, M preset, 86.9M params) in 5h43m to val loss 2.367 ->
+iters (**2.36B tokens** - an iter is a micro-batch; the run log claimed 9.44B, M preset, 86.9M params) in 5h43m to val loss 2.367 ->
 `checkpoints_pretrain/pretrain_best.pt`. Stage 2 (`scripts/run/07_sft.sh`) had
 never run - it fed the dataset builder on stdin, which a spawn process pool
 cannot re-import - and was first launched 2026-09-17.
@@ -109,8 +109,9 @@ reflog.
 
 **The MoE run** (`deep-moe-20`, 5090, token-budget batching at 16,384 x 8
 accumulation): 30,000 iters in **9h30m**, ~1.14 s/it, 363 W, 16 GB.
-66,782 micro-batches per epoch over 8 accumulation steps is 8,348 optimizer
-steps per epoch, so 30,000 iters is ~3.6 epochs. The LR schedule is cosine
+An iter is one micro-batch, so 30,000 iters over 66,782 micro-batches per
+epoch is **~0.45 epochs** (the old figure of 3.6 multiplied by the 8
+accumulation steps a second time). The LR schedule is cosine
 across `--iters`, so that number has to be right at launch - a run cut short
 never anneals.
 
