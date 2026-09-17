@@ -56,8 +56,11 @@ Chinchilla wants 20:1. A bigger model on this corpus memorises harder.
 
 The plan these support: pretrain on the shards for base competence, then SFT on
 the instruct mix, with `coherence_probe.py` as the first gate rather than an
-afterthought. The packed-sequence pretraining path (plain LM loss, no
-supervision mask) is **not yet written** - that is the next piece of work.
+afterthought. **Stage 1 is done**: `scripts/run/06_pretrain.sh` ran 72,000
+iters (9.44B tokens, M preset, 86.9M params) in 5h43m to val loss 2.367 ->
+`checkpoints_pretrain/pretrain_best.pt`. Stage 2 (`scripts/run/07_sft.sh`) had
+never run - it fed the dataset builder on stdin, which a spawn process pool
+cannot re-import - and was first launched 2026-09-17.
 
 ## Environment
 
