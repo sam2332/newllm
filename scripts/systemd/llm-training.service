@@ -1,0 +1,30 @@
+# Runs the L24 chat pipeline (pretrain -> chat SFT -> probe) and restarts it
+# after a crash or a reboot. The pipeline resumes from the last saved state.
+#   sudo install -m 644 scripts/systemd/llm-training.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now llm-training
+# Stop immediately: stop_training
+[Unit]
+Description=newllm training pipeline (L24 pretrain -> chat SFT -> probe)
+After=network-online.target
+Wants=network-online.target
+# A crash loop must not hammer the machine: at most 5 starts per hour.
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=lmeadows
+Group=lmeadows
+WorkingDirectory=/home/lmeadows/llm
+ExecStart=/home/lmeadows/llm/scripts/run/10_chat_pipeline.sh
+Restart=on-failure
+RestartSec=60
+# stop_training wants it gone now: SIGTERM to every process in the unit
+# (pipeline, trainer, dataloader workers), SIGKILL after 5 s.
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=5
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

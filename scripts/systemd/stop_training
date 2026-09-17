@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stop the newllm training pipeline immediately. Loses progress since the last
+# checkpoint (at most ~15 min of pretraining).
+#   stop_training            stop now; it starts again at next boot
+#   stop_training --disable  stop now and do not start at boot
+# Users other than root need a sudoers rule allowing exactly these commands.
+set -e
+if [ "$1" = "--disable" ]; then
+  sudo /usr/bin/systemctl disable llm-training.service
+fi
+sudo /usr/bin/systemctl stop llm-training.service
+echo "training stopped ($(date))"
