@@ -12,11 +12,13 @@ rules below.
 
 - **`.venv/bin/python` for everything.** System Python is 3.14 and has no torch
   wheels. Never `pip install` into system Python.
-- **One GPU at a time.** Both under load browns the machine out - this is a
-  fuse in the building, not a driver problem. `CUDA_VISIBLE_DEVICES=1` is the
-  5090; the run scripts set it for you. The whole-machine draw is what trips
-  it, so a CPU-saturating job counts too (two Ollama containers spilling a
-  34 GB model onto 96 cores did it).
+- **Both GPUs are allowed since the PSU swap (2026-09-17).** Before it, dual
+  load tripped a fuse in the building (it was sharing the circuit). After it, a
+  20-minute dual load (~780 W GPU) and the DDP L24 pretrain (~720 W) both held.
+  Pretrain runs under `torchrun` on both (`10_chat_pipeline.sh`); DDP is gated
+  by the 4090, ~1.35x the 5090 alone. `CUDA_VISIBLE_DEVICES=1` is the 5090.
+  Still watch whole-machine draw - a CPU-saturating job adds to it - and run
+  `git fsck` after any unplanned reboot.
 - **The teacher never produces a tool result.** Ollama-generated data supplies
   phrasings, reasoning sentences, prose and code only. Every observation in a
   trace comes from the real `Toolbox` or `VirtualWorkspace`. Break this and the

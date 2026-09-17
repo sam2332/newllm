@@ -19,10 +19,9 @@ known to be wrong - that file's README lists which.
 
 - **`.venv/bin/python` for everything.** System Python is 3.14 and has no torch
   wheels.
-- **Train on one GPU.** Both under load browns the machine out - it is a fuse
-  in the building. Use `CUDA_VISIBLE_DEVICES=1` (the 5090) or the run scripts.
-  Whole-machine draw is what trips it, so a CPU-saturating job counts: two
-  Ollama containers spilling a 34 GB model onto 96 cores did it.
+- **Both GPUs are allowed since the PSU swap (2026-09-17)**; dual load held a
+  20-minute test and the DDP pretrain. Pretrain uses `torchrun` on both.
+  `CUDA_VISIBLE_DEVICES=1` is the 5090. `git fsck` after any unplanned reboot.
 - **Never `pkill -f` a pipeline script.** The pattern matches the shell whose
   own command line contains it and kills your session mid-command. Three times
   so far. Use explicit PIDs or `scripts/run/launch_*.sh`.

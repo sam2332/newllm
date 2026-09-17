@@ -42,7 +42,9 @@ loginctl show-user "$USER" -p Linger      # want Linger=yes
 ```
 
 **2. Power.** Both GPUs at stock limits is 450 W + 575 W = 1025 W of GPU before
-the CPU, and the machine hard-rebooted under sustained dual-GPU load. Cap them
+the CPU. Before the 2026-09-17 PSU swap the machine hard-rebooted under
+sustained dual-GPU load; since then dual load holds and pretrain uses both. Caps
+are optional now
 (needs root, and does not persist across reboot):
 
 ```bash

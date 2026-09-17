@@ -64,10 +64,10 @@ cannot re-import - and was first launched 2026-09-17.
 
 ## Environment
 
-Two GPUs, but **train on one**. Both at stock limits is 450 W + 575 W = 1025 W of
-GPU before the CPU, and the machine hard-rebooted under sustained dual-GPU load.
-Capped and single-GPU, a run sits at ~350 W and has completed 89 minutes without
-incident. Caps need root and do not survive a reboot:
+Two GPUs, and **since the PSU swap on 2026-09-17 both may train**. Before it the
+machine hard-rebooted under sustained dual-GPU load (other loads shared the
+circuit). After it a 20-minute dual load (4090 ~311 W + 5090 ~469 W) held, and
+the L24 pretrain runs DDP on both at ~720 W, ~1.35x the 5090 alone. Caps need root and do not survive a reboot:
 
 ```bash
 sudo nvidia-smi -i 0 -pl 350      # RTX 4090, 24 GB
