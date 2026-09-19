@@ -28,7 +28,9 @@ template, 561M total / 172M active MoE at `arch_version 3`.
 | coherence, MoE | **broken.** "2 + 2" answers with gibberish; cannot recall a code from two turns back; 0/24 on the needle test at every length including 4k |
 | coherence, L24 chat | **fixed.** Fluent English, recalls the planted code from two turns back, answers "capital of France" correctly. New weak spots are repetition and count-following, not coherence |
 | knowledge | real where data was thick - correct on Python generators and `set -e`; incoherent on science (2,672 items vs python's 6,872) |
-| chat | **L24 chat SFT done 2026-09-19**, val 0.5334; coherence probe passes, `eval_chatml_random.py` not yet run |
+| chat | **L24 chat SFT done 2026-09-19**, val 0.5334. Coherence probe passes. Held-out grounded **6/20 (30%)**, token F1 0.51; free-text F1 0.44 |
+| multi-turn, L24 chat | **4/10**. Coreference 3/3, but back-reference 0/2, ellipsis 0/2, topic-switch 0/2 |
+| agentic depth, L24 chat | grounded by reference depth 0-1 **40%**, 2-3 **50%**, 4-7 **17%**, 8+ **0%**; `eval_agentic.py` 0/12 on generated tasks |
 | roleplay | personas exist in data; no eval |
 | Ollama | proxy works (`serve_ollama.py`); **GGUF exports cleanly** as `qwen3moe` with 65,536 context, not yet loaded into a container |
 
@@ -76,7 +78,72 @@ quote) solved 1 of 12 generated tasks, and **9 of the 11 failures were
 `early_stop`**: the model makes one or two tool calls and then answers with
 whatever it has, rather than running the chain to the end. At depth 5 it spent
 1-2 calls where 5 were needed. Depth is not degrading a working loop; the loop
-stops early. Worth a proper run at larger n before drawing conclusions.
+stops early. The held-out eval agrees from the other direction - grounded
+accuracy by reference depth runs 40%, 50%, 17%, **0% at 8+** - so two harnesses
+built on different data say the same thing.
+
+**Tool use regressed, and that was the trade.** 30% grounded against the MoE's
+37% and the legacy byte model's 41/100. Not a regression to chase:
+`09_sft_chat.sh` is deliberately 75% imported SmolTalk conversation with the
+synthetic tool slices cut to a few percent, because this run was for the chat
+half of "tools + chat". The multi-turn battery says the same thing precisely -
+**coreference 3/3** ("what is 12 + 8" then "multiply that by 3" works) while
+back-reference, ellipsis and topic-switch are all 0. It resolves against the
+immediately preceding turn and cannot reach further back.
+
+### Why it stops early: the imported corpus has no feedback loop in it
+
+This is measured, not inferred. **Not one of the 60,000 `data/hf_xlam.json`
+traces contains a single tool observation** - `<tool name=` appears 0 times.
+The traces are a user turn, one or two assistant tool calls emitted
+back-to-back, and then the trace ends; the model is never shown a result
+coming back. `data/hf_openhermes.json` and `data/hf_smol_*.json` contain no
+tool observations either (0 of 5,000 sampled in each).
+
+So across the 75% of the chat SFT mix that is imported data, the demonstrated
+behaviour is exactly *emit a call or two, then stop* - which is precisely what
+`eval_agentic.py` measures it doing. Only the synthetic slices
+(`project_fraction=0.02`, part of `knowledge`) carry genuine
+call -> observation -> call arcs, and the chat mix cut them to a few percent.
+**Early stopping is not a capability ceiling here; it is the behaviour the
+data taught.** Depth in `hf_xlam.json` is shallow besides: of 4,000 sampled,
+98.9% have 3 or fewer tool calls and 45 have 4+.
+
+### What the literature says to do about both failures
+
+- **The repetition is a data property, not a decoding accident.** "Repetition
+  In Repetition Out" ([arXiv 2310.10226](https://arxiv.org/abs/2310.10226))
+  finds a strong correlation between repetition in *training data* and
+  degeneration at inference, shows the mechanism is self-reinforcing at the
+  sentence level, and reports that penalising training-data repetition is the
+  common factor behind several previously separate fixes - and that it still
+  matters at larger model sizes and after instruction tuning. This corpus is
+  **78.8% repeated sentences**, which predicts exactly the loop observed: in
+  `eval_agentic.py` the model opened a `<tool_call>` and emitted the same
+  `print(...)` line until the token budget ran out, at 2,048 and again at
+  4,096 tokens (`kind=malformed`, never closing the tag). Raising the budget
+  does not help; deduplicating the corpus is the lever.
+- **The missing data type exists and is verified.** APIGen-MT
+  ([arXiv 2504.03601](https://arxiv.org/abs/2504.03601)) generates multi-turn
+  agent trajectories through simulated agent-human interplay with three-stage
+  verification (format, real function execution, semantic), reporting 99%
+  human-judged success over 200 sampled trajectories.
+  [`Salesforce/APIGen-MT-5k`](https://huggingface.co/datasets/Salesforce/APIGen-MT-5k)
+  is 5,000 of those trajectories, open, and is the subset used to train xLAM-2.
+  It is the shape this corpus lacks: **tool results actually come back**.
+  Importing it through `scripts/import_hf_dataset.py` is the cheapest
+  intervention available, and it respects the teacher invariant, since the
+  observations in it were produced by real function execution rather than
+  written by a model.
+- **Scale check before expecting much.** xLAM-2-1b-fc-r scores 43.12% on BFCL
+  v3 ([xLAM](https://arxiv.org/pdf/2409.03215)); this model is 283M, roughly a
+  quarter of that, so the target is a working loop, not a competitive score.
+- **BFCL v3** ([leaderboard paper](https://openreview.net/forum?id=2GmDdhBdDk))
+  is the standard for this and judges **by post-execution system state rather
+  than by matching parameters**, which is the same choice `eval_agentic.py`'s
+  `project` family makes by running the code. Its four categories - Base,
+  Missing Functions, Missing Parameters, Long Context - are a ready-made list
+  of what to add next; `eval_agentic.py` currently covers Base only.
 
 ## The data now on disk
 
