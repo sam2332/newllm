@@ -221,21 +221,22 @@ full tilt is its own large load. Long teacher runs therefore use one endpoint
 (`--endpoints 1`); `scripts/gen_*_ollama.py` save incrementally so a cut costs
 minutes.
 
-**The power caps are not applied right now, and the unit that was supposed to
-apply them is disabled.** `/etc/systemd/system/nvidia-power-limit.service`
-exists and has the right `-pl 350` / `-pl 450` lines, but it is
-`disabled; inactive (dead)`, so since the 2026-09-18 reboots both cards have
-been running at their firmware maximum (4090 450 W, 5090 575 W). A single-GPU
-L24 SFT step draws **510 W** on the 5090 there, against the 363 W measured
-under the 450 W cap. Re-enabling needs root:
+**The power caps are applied** (verified 2026-09-19: 350 W / 450 W, unit
+`enabled` and `active`). `/etc/systemd/system/nvidia-power-limit.service`
+carries the `-pl 350` / `-pl 450` lines and is enabled at boot.
+
+They were *not* applied for part of 2026-09-18 and 09-19, after that day's
+reboots left the unit disabled - both cards ran at their firmware maximum
+(4090 450 W, 5090 575 W) and an L24 SFT step drew **510 W** on the 5090
+against the 363 W measured under the cap. So check rather than assume:
 
 ```bash
-sudo systemctl enable --now nvidia-power-limit.service
 nvidia-smi --query-gpu=power.limit --format=csv    # expect 350.00 W / 450.00 W
 ```
 
-Verify the caps rather than assuming the unit did it - this note previously
-claimed they survived a reboot, and they did not.
+An earlier version of this note asserted the caps survived a reboot at a time
+when they did not, which is the reason the check is written down instead of
+the conclusion.
 
 **Write logs to `logs/`, never `/tmp`** - `/tmp` is cleared on reboot, so the
 evidence from a crash disappears exactly when it is wanted.
