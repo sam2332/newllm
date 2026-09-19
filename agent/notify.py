@@ -31,6 +31,7 @@ Three rules this module keeps, in order of importance:
 import json
 import os
 import queue
+import re
 import socket
 import sys
 import threading
@@ -41,6 +42,23 @@ from urllib import request as urlrequest
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CONFIG = os.path.join(REPO_ROOT, "config.json")
 MAX_CONTENT = 1900          # Discord's limit is 2000; leave room for the prefix.
+
+# Webhook posts, unlike messages typed in the client, do not expand
+# ``:shortcode:`` into an emoji; Discord shows the literal text. Convert the
+# ones this repo uses; unknown codes pass through untouched.
+EMOJI = {
+    "white_check_mark": "\u2705", "rotating_light": "\U0001F6A8",
+    "warning": "\u26A0\uFE0F", "package": "\U0001F4E6",
+    "bar_chart": "\U0001F4CA", "x": "\u274C", "rocket": "\U0001F680",
+    "hourglass": "\u231B", "fire": "\U0001F525", "tada": "\U0001F389",
+    "information_source": "\u2139\uFE0F", "stop_sign": "\U0001F6D1",
+}
+_SHORTCODE = re.compile(r":([a-z0-9_+-]+):")
+
+
+def emojize(text: str) -> str:
+    return _SHORTCODE.sub(lambda m: EMOJI.get(m.group(1), m.group(0)), text)
+
 
 _lock = threading.Lock()
 _state = {"loaded": False, "cfg": {}, "warned": False, "worker": None,
@@ -152,7 +170,7 @@ def notify(message: str, *, tag: str = None, host: bool = True,
     d = _discord_config()
     if not d:
         return False
-    text = str(message)
+    text = emojize(str(message))
     prefix = f"**{socket.gethostname()}**" if host else ""
     if tag:
         prefix = f"{prefix} `{tag}`" if prefix else f"`{tag}`"

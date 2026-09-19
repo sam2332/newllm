@@ -5,7 +5,7 @@ got that way** - superseded notes are in [archive/notes/](archive/notes/).
 How to actually run things: [scripts/run/README.md](scripts/run/README.md).
 Traps that have cost real time: [docs/CODE_SMELLS.md](docs/CODE_SMELLS.md).
 
-Last verified 2026-09-15.
+Last verified 2026-09-19.
 
 ## What this is
 
@@ -26,8 +26,9 @@ template, 561M total / 172M active MoE at `arch_version 3`.
 | tool use, legacy | **41/100** held-out, reproducible. Strong at 1-2 calls (75-83%), weak at 4+ (20%) |
 | tool use, MoE | 29/100 overall, **37% on grounded answers**. Better deep (57% at 4-7 hops), worse shallow (44%) |
 | coherence, MoE | **broken.** "2 + 2" answers with gibberish; cannot recall a code from two turns back; 0/24 on the needle test at every length including 4k |
+| coherence, L24 chat | **fixed.** Fluent English, recalls the planted code from two turns back, answers "capital of France" correctly. New weak spots are repetition and count-following, not coherence |
 | knowledge | real where data was thick - correct on Python generators and `set -e`; incoherent on science (2,672 items vs python's 6,872) |
-| chat | trained, never properly evaluated |
+| chat | **L24 chat SFT done 2026-09-19**, val 0.5334; coherence probe passes, `eval_chatml_random.py` not yet run |
 | roleplay | personas exist in data; no eval |
 | Ollama | proxy works (`serve_ollama.py`); **GGUF exports cleanly** as `qwen3moe` with 65,536 context, not yet loaded into a container |
 
@@ -35,14 +36,47 @@ Checkpoints: `checkpoints_long_M/agent_best.pt` (legacy best, val 0.0434),
 `checkpoints_moe_v2/agent_best.pt` (30,000 iters in 9.5h, best val 1.0324,
 final train 0.618).
 
-**The headline finding.** The MoE model recites its training set rather than
-generalising. `scripts/coherence_probe.py` shows it answering "Hello!" with a
+**The headline finding, and the pretrain that answered it.** The MoE model
+recites its training set rather than generalising. `scripts/coherence_probe.py` shows it answering "Hello!" with a
 sentence copied verbatim from `agent/direct_traces.py` and "List three fruits"
 with "I can't - I have no access to your email". Results track data volume per
 domain almost monotonically. The corpus explains it: 260k traces composed from
 a few thousand library items, **78.8% of sentences are repeats** of another
 sentence, distinct-8 of 0.288, roughly 1B tokens against 561M parameters where
 Chinchilla wants 20:1. A bigger model on this corpus memorises harder.
+
+**Pretraining fixed it.** The L24 chat model (FineWeb-Edu pretrain -> chat SFT)
+passes the probe the MoE failed: "Hello!" gets "Hello. What are we working
+on?" rather than a sentence copied out of `direct_traces.py`, "What is 2 + 2?"
+reaches 4, and it **recalls the access code 7391 planted two turns earlier** -
+the specific thing recorded above as impossible. So the recitation was a data
+problem, not an architecture one, and the pretrain stage was the fix.
+
+What is wrong now is different and worth naming precisely, because it is easy
+to read the probe as a clean pass:
+
+- **Repetition inside an answer.** Nearly every long reply restates its own
+  clause - photosynthesis "provides the oxygen we breathe, produces oxygen",
+  `set -e` ends on a verbatim repeat of its second sentence.
+- **Counts are not followed.** "List three fruits" returns eight, with
+  "Cherry" three times.
+- **Right answer, invented reasoning.** 2 + 2 arrives at 4 through
+  "subtracting 2 from both sides" and two irrelevant divisions. The number is
+  correct and the derivation is nonsense, so arithmetic accuracy alone will
+  overstate this model.
+- **Thin topics still degrade.** The sky answer loops on "enters the Earth's
+  atmosphere" and never reaches Rayleigh scattering; DRY is defined wrongly.
+
+These read like an undertrained model at 1.23 epochs rather than a broken one,
+and a repetition penalty at decode is untested here.
+
+**It does not yet sustain a long tool chain.** A first pass of
+`scripts/eval_agentic.py` (n=2 per cell, so indicative only, not a number to
+quote) solved 1 of 12 generated tasks, and **9 of the 11 failures were
+`early_stop`**: the model makes one or two tool calls and then answers with
+whatever it has, rather than running the chain to the end. At depth 5 it spent
+1-2 calls where 5 were needed. Depth is not degrading a working loop; the loop
+stops early. Worth a proper run at larger n before drawing conclusions.
 
 ## The data now on disk
 
@@ -62,6 +96,23 @@ iters (**2.36B tokens** - an iter is a micro-batch; the run log claimed 9.44B, M
 never run - it fed the dataset builder on stdin, which a spawn process pool
 cannot re-import - and was first launched 2026-09-17.
 
+**A second, larger stage 1 is also done.** `scripts/run/10_chat_pipeline.sh`
+ran the L24 preset (282,644,480 params) under `torchrun` on both GPUs:
+200,000 iters per rank at batch 4 x 2,048, **3.28B tokens** in 10h45m to val
+loss **2.1232** -> `checkpoints_pretrain_L24/pretrain_best.pt`. That is the
+base the chat SFT warm-starts from.
+
+**The chat SFT then OOMed at iter 1 and the pipeline stopped** (2026-09-18
+04:38). L24 is 3.3x the M preset's parameters, and `09_sft_chat.sh` inherited
+M's 16,384-token micro-batch with no gradient checkpointing: the backward
+wanted 512 MiB more than the 5090 had, with 31.09 of 31.45 GiB already in use.
+Validation at step 0 passed first, so the log looks like a healthy start.
+`--grad-checkpoint` is now in the script and is **not optional at this size** -
+measured, the same batch peaks at **10.7 GiB** and runs at **2.2 it/s**, which
+puts the 40,000-iter run at ~5 h. The headroom matters as much as the fix: the
+token-budget sampler draws longer batches later, and a run that merely fits at
+iter 1 can still die at hour four.
+
 ## Environment
 
 Two GPUs, and **since the PSU swap on 2026-09-17 both may train**. Before it the
@@ -79,14 +130,23 @@ Python 3.12 venv, torch 2.11.0+cu128, bf16 native on both cards. Use
 `.venv/bin/python` for everything; system Python is 3.14 and has no torch
 wheels. `scripts/run/00_preflight.sh` checks all of this.
 
-**The machine has hard-cut twice, and not from GPU load.** Boot logs end
-mid-line with no shutdown sequence and no error entries, then a 10-15 minute
+**The machine has hard-cut five times, and not from GPU load.** Boot logs end
+mid-line with no shutdown sequence and no error entries, then a 5-100 minute
 gap before the next boot:
 
 | when | what was running | draw |
 |---|---|---|
 | 2026-09-13 16:45 | `stress-ng --cpu 128 --vm-bytes 80%` - **no GPU load** | CPU/RAM only |
 | 2026-09-14 02:46 | Ollama inference on **both** endpoints | ~250 W GPU |
+| 2026-09-18 14:01 | **nothing** - the pipeline had already died at 04:38 | idle |
+| 2026-09-18 16:52 | **nothing** | idle |
+| 2026-09-18 17:58 | **nothing** | idle |
+
+The three on 2026-09-18 happened with both GPUs at idle and no job running,
+which rules out training load as the cause for those and weakens the
+whole-machine-draw theory as a complete explanation. Whatever it is, it is
+still live, so long runs need `--save-every` small enough that a cut is cheap
+(the chat SFT saves every 1,000 iters, ~7.5 min).
 
 Single-GPU training at 350 W has run 89 minutes without incident. So the
 trigger is whole-machine draw, not the GPUs specifically - a 128-core EPYC at
@@ -94,9 +154,21 @@ full tilt is its own large load. Long teacher runs therefore use one endpoint
 (`--endpoints 1`); `scripts/gen_*_ollama.py` save incrementally so a cut costs
 minutes.
 
-Power caps now survive a reboot: `/etc/systemd/system/nvidia-power-limit.service`
-applies `-pl 350` / `-pl 450` at boot. Verify with `nvidia-smi
---query-gpu=power.limit --format=csv`.
+**The power caps are not applied right now, and the unit that was supposed to
+apply them is disabled.** `/etc/systemd/system/nvidia-power-limit.service`
+exists and has the right `-pl 350` / `-pl 450` lines, but it is
+`disabled; inactive (dead)`, so since the 2026-09-18 reboots both cards have
+been running at their firmware maximum (4090 450 W, 5090 575 W). A single-GPU
+L24 SFT step draws **510 W** on the 5090 there, against the 363 W measured
+under the 450 W cap. Re-enabling needs root:
+
+```bash
+sudo systemctl enable --now nvidia-power-limit.service
+nvidia-smi --query-gpu=power.limit --format=csv    # expect 350.00 W / 450.00 W
+```
+
+Verify the caps rather than assuming the unit did it - this note previously
+claimed they survived a reboot, and they did not.
 
 **Write logs to `logs/`, never `/tmp`** - `/tmp` is cleared on reboot, so the
 evidence from a crash disappears exactly when it is wanted.
@@ -284,6 +356,15 @@ scripts/run/04_eval.sh checkpoints_long_M/agent_best.pt
 - `scripts/eval_chat.py` - scores coreference, ellipsis, back-reference, topic
   switch and no-tool-needed separately. **Never run against a trained model.**
 - `scripts/diag_deep_chains.py` - classifies *why* deep chains fail.
+- `scripts/eval_agentic.py` - **generated** multi-step tasks at a chosen depth
+  (2-20+), not held-out traces, so the shapes are ones no generator trained on.
+  Three families: `chain` (arithmetic where step k needs step k-1, the only
+  true sequential dependency), `ledger` (write N files, then aggregate) and
+  `lookup` (retrieve N keys, then combine). Ground truth is computed in Python
+  and every observation comes from the real `Toolbox`/`VirtualWorkspace`.
+  Reports solved, calls-used against calls-needed, and a first-failure
+  taxonomy, because "40% at depth 10" is not actionable. `--rename` swaps in
+  opaque surface names to separate chaining from name memorisation.
 
 ## Two caps that were hiding real accuracy
 
@@ -521,6 +602,12 @@ big run.
 - **`$!` is not the trainer.** `setsid`/`env` fork, so the pid you capture exits
   immediately and a liveness check on it reports a healthy run as dead. Use
   `pgrep -f "train_split.py --mode instruct"`.
+- **...but that `pgrep -f` self-matches inside a wait loop.** The same pattern
+  that makes `pkill -f` kill your own shell makes
+  `until ! pgrep -f "train_split.py ..."; do sleep 5; done` never exit: the
+  loop's own command line contains the pattern, so it matches itself and spins
+  forever after the trainer is long gone. Break the self-match with a character
+  class - `pgrep -f "train_spli[t].py"` - or check the GPU instead.
 - **Progress looks stalled during a battery eval.** ~2 minutes with no log
   output. Check `nvidia-smi` before concluding anything hung.
 - **A log stopping at exactly 4096 bytes** means the process was killed with one

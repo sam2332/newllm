@@ -185,14 +185,11 @@ def token_f1(got: str, want: str) -> float:
     return 2 * prec * rec / (prec + rec)
 
 
-def run_trace(model, tok, tools, system, question, *, device, max_steps,
-              max_new, seed):
-    """Replay one conversation; return (final_answer, hops)."""
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": question})
-    tb = bind_toolbox(tools)
+def run_turn(model, tok, messages, tools, tb, *, device, max_steps, max_new,
+             seed):
+    """Drive one user turn to an answer, appending every message it produces
+    to ``messages`` so the caller can keep asking follow-ups on the same
+    history. Returns (final_answer, hops)."""
     allowed = [t.get("function", t).get("name") for t in tools]
     sampler = sampler_from_options({"temperature": 0})
     for hop in range(max_steps):
@@ -215,8 +212,71 @@ def run_trace(model, tok, tools, system, question, *, device, max_steps,
                 obs = f"error: {exc}"
             messages.append({"role": "tool", "content": str(obs)[:12288]})
             continue
+        messages.append({"role": "assistant", "content": res.response or ""})
         return (res.response or "").strip(), hop
     return None, max_steps
+
+
+def run_trace(model, tok, tools, system, question, *, device, max_steps,
+              max_new, seed):
+    """Replay one single-question conversation; return (final_answer, hops)."""
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": question})
+    return run_turn(model, tok, messages, tools, bind_toolbox(tools),
+                    device=device, max_steps=max_steps, max_new=max_new,
+                    seed=seed)
+
+
+def score_skills(model, tok, *, device, max_steps, max_new, seed,
+                 verbose=False):
+    """The multi-turn conversation battery, replayed through ChatML.
+
+    ``scripts/eval_chat.py`` asks exactly these questions but calls
+    ``require_legacy_protocol``, so it cannot be pointed at a BPE/ChatML
+    checkpoint at all - which left the only thing the chat split exists for
+    (does a follow-up turn resolve against the earlier ones?) unmeasured on
+    every current checkpoint. The cases are imported rather than copied so
+    the two harnesses cannot drift apart.
+
+    Only the FINAL turn of each case is scored; the earlier turns are there
+    to build the context it has to reach back into.
+    """
+    from scripts.eval_chat import CASES
+
+    tb = attach_sandbox_tools(attach_repo_tools(Toolbox()))
+    tools = tb.schemas
+    by_skill, correct = {}, 0
+    for case in CASES:
+        messages = []
+        got = ""
+        try:
+            for turn in case["turns"]:
+                messages.append({"role": "user", "content": turn})
+                answer, _ = run_turn(model, tok, messages, tools, tb,
+                                     device=device, max_steps=max_steps,
+                                     max_new=max_new, seed=seed)
+                got = (answer or "").strip()
+        except Exception as exc:                            # noqa: BLE001
+            got = f"<error: {exc}>"
+        exp = case["expected"]
+        try:
+            hit = abs(float(got) - float(exp)) < 1e-3
+        except ValueError:
+            hit = bool(got) and norm(exp) in norm(got)
+        correct += hit
+        d = by_skill.setdefault(case["skill"], [0, 0])
+        d[1] += 1
+        d[0] += hit
+        if verbose:
+            print(f"  {' / '.join(case['turns'])[:58]:58s} exp={exp:>8s} "
+                  f"got={got[:20]:>20s} {'Y' if hit else '.'}")
+    n = len(CASES)
+    print(f"\nmulti-turn skills: {correct}/{n} ({100.0*correct/n:.0f}%)")
+    for k, (c, t) in sorted(by_skill.items()):
+        print(f"  {k:9s} {c}/{t} ({100.0*c/t:.0f}%)")
+    return correct, n
 
 
 def main():
@@ -230,6 +290,8 @@ def main():
     ap.add_argument("--max-steps", type=int, default=64)
     ap.add_argument("--max-new", type=int, default=512)
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--no-skills", action="store_true",
+                    help="skip the multi-turn conversation battery")
     args = ap.parse_args()
 
     data = torch.load(args.cache, weights_only=False)
@@ -314,12 +376,6 @@ def main():
               f"mean token F1 {long_f1/long_total:.2f}")
         print("     (F1 is the number to read for prose; exact match scores a "
               "correct paraphrase zero)")
-    from agent.notify import notify
-    notify(f":bar_chart: **eval** `{os.path.basename(os.path.dirname(args.checkpoint))}`  "
-           f"{ok}/{scored} ({pct:.0f}%)"
-           + (f", grounded {short_ok}/{short_total} "
-              f"({100.0*short_ok/short_total:.0f}%), F1 {short_f1/short_total:.2f}"
-              if short_total else ""), tag="eval", blocking=True)
     print("by tool-calls in the reference trace (all answers):")
     for b in ("0-1", "2-3", "4-7", "8+"):
         if hops_total.get(b):
@@ -330,6 +386,24 @@ def main():
         if shops_total.get(b):
             n, d = shops_ok.get(b, 0), shops_total[b]
             print(f"  {b:5s} {n:3d}/{d:3d}  ({100.0*n/d:.0f}%)")
+
+    skill_ok = skill_n = 0
+    if not args.no_skills:
+        skill_ok, skill_n = score_skills(
+            model, tok, device=args.device, max_steps=args.max_steps,
+            max_new=args.max_new, seed=args.seed, verbose=args.verbose)
+
+    # Last message of the process, so blocking=True: a daemon thread does not
+    # survive interpreter shutdown.
+    from agent.notify import notify
+    notify(f":bar_chart: **eval** `{os.path.basename(os.path.dirname(args.checkpoint))}`  "
+           f"{ok}/{scored} ({pct:.0f}%)"
+           + (f", grounded {short_ok}/{short_total} "
+              f"({100.0*short_ok/short_total:.0f}%), F1 {short_f1/short_total:.2f}"
+              if short_total else "")
+           + (f", multi-turn {skill_ok}/{skill_n} "
+              f"({100.0*skill_ok/skill_n:.0f}%)" if skill_n else ""),
+           tag="eval", blocking=True)
 
 
 if __name__ == "__main__":

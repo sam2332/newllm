@@ -47,11 +47,19 @@ CACHE=$(cat "$PATH_OUT")
 echo "dataset: $CACHE"
 
 # Runs in the foreground: launch this inside a named screen.
+#
+# --grad-checkpoint is not optional at this size. L24 is 283M dense against the
+# M preset's 86.9M, and without it a 16,384-token micro-batch OOMs in the
+# backward of iter 1 (2026-09-18: 31.09 of the 5090's 31.45 GiB in use, short
+# by 512 MiB). With it the same batch peaks at 10.7 GiB and runs at 2.2 it/s,
+# so the whole 40,000 iters is ~5 h. Recomputation is cheap here; the headroom
+# is what keeps a long trace late in the run from ending it.
 env CUDA_VISIBLE_DEVICES="$GPU" PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
   .venv/bin/python -u scripts/train_split.py \
   --mode instruct --size "$SIZE" --dataset-cache "$CACHE" --tokenizer "$TOK" \
   --init-checkpoint "$INIT" \
   --max-len "$MAXLEN" --max-tokens 16384 --max-batch 64 --grad-accum 4 \
+  --grad-checkpoint \
   --iters "$ITERS" --lr "$LR" --eval-every 0 --val-batches 40 --save-every 1000 \
   --out "$OUT" 2>&1 | tee -a logs/sft_chat.log
 exit "${PIPESTATUS[0]}"
